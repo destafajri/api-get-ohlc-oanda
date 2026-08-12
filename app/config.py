@@ -16,7 +16,6 @@ class Settings(BaseSettings):
     )
 
     oanda_token: Annotated[SecretStr, Field(min_length=1)]
-    oanda_account_id: Annotated[SecretStr, Field(min_length=1)]
     oanda_environment: Literal["practice", "live"] = "practice"
     oanda_timeout_seconds: Annotated[float, Field(gt=0, le=60)] = 10.0
 
