@@ -4,7 +4,7 @@ A production-minimal FastAPI service that fetches midpoint candlesticks from OAN
 
 ## Features
 
-- `GET /ohlc` with validated instrument, granularity, and count
+- `GET /ohlc` with validated recent-count and historical time-range modes
 - async upstream calls with connection pooling and timeouts
 - normalized OHLC response; decimal prices remain strings to preserve precision
 - safe upstream error mapping without leaking credentials or raw auth details
@@ -30,12 +30,11 @@ Edit `.env` with your own credentials:
 
 ```dotenv
 OANDA_TOKEN=your-token
-OANDA_ACCOUNT_ID=your-account-id
 OANDA_ENVIRONMENT=practice
 OANDA_TIMEOUT_SECONDS=10
 ```
 
-`OANDA_ENVIRONMENT` accepts only `practice` or `live`. The account ID is kept in configuration for account-scoped extensions; the current candles endpoint itself is instrument-scoped. Neither credential is returned by the API or logged by the application.
+`OANDA_ENVIRONMENT` accepts only `practice` or `live`. This instrument candles endpoint does not need an OANDA account ID. The bearer token is never returned by the API or logged by the application.
 
 Start the server:
 
@@ -45,13 +44,36 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 Open [http://localhost:8000/docs](http://localhost:8000/docs) for Swagger UI.
 
-## Usage
+## Usage: latest candles
 
 ```bash
 curl --get 'http://localhost:8000/ohlc' \
   --data-urlencode 'instrument=XAU_USD' \
   --data-urlencode 'granularity=H4' \
   --data-urlencode 'count=100'
+```
+
+If neither `count` nor `from` is supplied, `count` defaults to `100`.
+
+## Usage: time range
+
+Use RFC3339 timestamps with an explicit timezone (`Z` or an offset such as `+07:00`):
+
+```bash
+curl --get 'http://localhost:8000/ohlc' \
+  --data-urlencode 'instrument=XAU_USD' \
+  --data-urlencode 'granularity=H4' \
+  --data-urlencode 'from=2026-05-12T00:00:00Z' \
+  --data-urlencode 'to=2026-08-12T23:59:59Z'
+```
+
+`to` may be omitted. The API forwards only `from`, and OANDA returns candles through the latest available data:
+
+```bash
+curl --get 'http://localhost:8000/ohlc' \
+  --data-urlencode 'instrument=XAU_USD' \
+  --data-urlencode 'granularity=H4' \
+  --data-urlencode 'from=2026-05-12T00:00:00Z'
 ```
 
 Example response:
@@ -87,7 +109,21 @@ curl 'http://localhost:8000/health'
 | --- | --- | --- |
 | `instrument` | uppercase OANDA pair with `_`, 3-20 characters | `XAU_USD` |
 | `granularity` | OANDA candle granularity from `S5` through `M` | `H4` |
-| `count` | integer from 1 to 5000; defaults to 100 | `100` |
+| `count` | integer from 1 to 5000; defaults to 100 in latest-candles mode | `100` |
+| `from` | optional RFC3339 range start with timezone; enables range mode | `2026-05-12T00:00:00Z` |
+| `to` | optional RFC3339 range end with timezone; requires `from`; omitted means latest available data | `2026-08-12T23:59:59Z` |
+
+### Request validation
+
+Invalid requests are rejected locally with HTTP `422` before any request is sent to OANDA:
+
+- `count` cannot be combined with either `from` or `to`.
+- `to` cannot be supplied without `from`.
+- `from` and `to` must include a timezone.
+- neither timestamp may be later than the server's current time.
+- `from` must be earlier than `to`.
+- `count` must be between 1 and 5000.
+- unknown query parameters are rejected to catch typos.
 
 Only midpoint (`M`) candles are requested. Incomplete candles are retained and marked with `complete: false`, allowing callers to decide whether to use them.
 
@@ -103,6 +139,6 @@ Tests mock OANDA, so they do not require real credentials and never make trading
 ## Security notes
 
 - Never commit `.env`; it is ignored by Git.
-- Use a secret manager in production and inject the three `OANDA_*` variables at runtime.
+- Use a secret manager in production and inject `OANDA_TOKEN` at runtime. Configure `OANDA_ENVIRONMENT` and `OANDA_TIMEOUT_SECONDS` as ordinary environment settings.
 - Put this API behind authentication or a private network before exposing it publicly. The OANDA token stays server-side, but an unprotected endpoint could still be abused to consume quota.
 - Use HTTPS at the ingress or reverse proxy.

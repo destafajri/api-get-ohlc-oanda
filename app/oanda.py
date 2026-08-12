@@ -1,9 +1,10 @@
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
 from app.config import Settings
-from app.models import Candle, Granularity, OhlcResponse
+from app.models import Candle, OhlcQuery, OhlcResponse
 
 
 class OandaServiceError(Exception):
@@ -19,19 +20,22 @@ class OandaService:
         self.client = client
         self.settings = settings
 
-    async def get_ohlc(
-        self, instrument: str, granularity: Granularity, count: int
-    ) -> OhlcResponse:
-        url = f"{self.settings.oanda_base_url}/instruments/{instrument}/candles"
+    async def get_ohlc(self, query: OhlcQuery) -> OhlcResponse:
+        url = f"{self.settings.oanda_base_url}/instruments/{query.instrument}/candles"
         headers = {
             "Authorization": f"Bearer {self.settings.oanda_token.get_secret_value()}",
             "Accept-Datetime-Format": "RFC3339",
         }
         params = {
-            "granularity": granularity.value,
-            "count": count,
+            "granularity": query.granularity.value,
             "price": "M",
         }
+        if query.count is not None:
+            params["count"] = str(query.count)
+        else:
+            params["from"] = self._format_rfc3339(query.from_time)
+            if query.to_time is not None:
+                params["to"] = self._format_rfc3339(query.to_time)
 
         try:
             response = await self.client.get(
@@ -72,11 +76,17 @@ class OandaService:
             ) from exc
 
         return OhlcResponse(
-            instrument=str(payload.get("instrument", instrument)),
-            granularity=granularity,
+            instrument=str(payload.get("instrument", query.instrument)),
+            granularity=query.granularity,
             count=len(candles),
             candles=candles,
         )
+
+    @staticmethod
+    def _format_rfc3339(value: datetime | None) -> str:
+        if value is None:  # Guarded by OhlcQuery validation.
+            raise ValueError("range timestamp is required")
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
     @staticmethod
     def _raise_for_error(response: httpx.Response) -> None:

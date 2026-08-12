@@ -10,8 +10,8 @@ from app.config import ConfigurationError, Settings, get_settings
 from app.models import (
     ErrorDetail,
     ErrorResponse,
-    Granularity,
     HealthResponse,
+    OhlcQuery,
     OhlcResponse,
 )
 from app.oanda import OandaService, OandaServiceError
@@ -86,19 +86,9 @@ async def health() -> HealthResponse:
 )
 async def get_ohlc(
     request: Request,
-    instrument: Annotated[
-        str,
-        Query(
-            min_length=3,
-            max_length=20,
-            pattern=r"^[A-Z0-9]+_[A-Z0-9]+$",
-            examples=["XAU_USD"],
-        ),
-    ],
-    granularity: Annotated[Granularity, Query(examples=["H4"])],
-    count: Annotated[int, Query(ge=1, le=5000)] = 100,
+    query: Annotated[OhlcQuery, Query()],
     settings: Settings = Depends(get_settings),
 ) -> OhlcResponse:
     """Return normalized midpoint OHLC candles from OANDA."""
     service = OandaService(request.app.state.http_client, settings)
-    return await service.get_ohlc(instrument, granularity, count)
+    return await service.get_ohlc(query)
