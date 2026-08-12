@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oanda-ohlc-api"
+version = "1.0.0"
+description = "Production-minimal FastAPI service for normalized OANDA OHLC data"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.116,<0.129",
+    "httpx>=0.28,<1.0",
+    "pydantic-settings>=2.10,<3.0",
+    "uvicorn[standard]>=0.35,<0.40",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4,<9.0",
+    "respx>=0.22,<1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
