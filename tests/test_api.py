@@ -77,6 +77,22 @@ def test_head_checks_do_not_require_oanda(client: TestClient) -> None:
     assert ohlc.headers["Vercel-CDN-Cache-Control"]
 
 
+def test_head_ohlc_reports_requested_csv_type(client: TestClient) -> None:
+    response = client.head(
+        "/ohlc",
+        params={
+            "instrument": "XAU_USD",
+            "granularity": "H4",
+            "count": 100,
+            "format": "csv",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert response.content == b""
+
+
 def test_head_ohlc_reuses_query_validation(client: TestClient) -> None:
     response = client.head(
         "/ohlc", params={"instrument": "xauusd", "granularity": "H4"}
@@ -89,7 +105,12 @@ def test_openapi_docs_are_available(client: TestClient) -> None:
     response = client.get("/openapi.json")
 
     assert response.status_code == 200
-    assert "/ohlc" in response.json()["paths"]
+    schema = response.json()
+    assert "/ohlc" in schema["paths"]
+    operation = schema["paths"]["/ohlc"]["get"]
+    assert "format" in [parameter["name"] for parameter in operation["parameters"]]
+    assert "application/json" in operation["responses"]["200"]["content"]
+    assert "text/csv" in operation["responses"]["200"]["content"]
 
 
 def test_missing_configuration_returns_safe_error(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -161,6 +182,72 @@ def test_get_ohlc_normalizes_oanda_response(client: TestClient) -> None:
     )
     assert response.headers["CDN-Cache-Control"]
     assert response.headers["Vercel-CDN-Cache-Control"]
+
+
+@respx.mock
+def test_get_ohlc_can_return_csv_without_losing_precision(
+    client: TestClient,
+) -> None:
+    route = respx.get(
+        "https://api-fxpractice.oanda.com/v3/instruments/XAU_USD/candles"
+    ).mock(
+        return_value=Response(
+            200,
+            json={
+                "instrument": "XAU_USD",
+                "granularity": "H4",
+                "candles": [
+                    {
+                        "complete": False,
+                        "volume": 123,
+                        "time": "2026-08-12T20:00:00.000000000Z",
+                        "mid": {
+                            "o": "3348.210",
+                            "h": "3361.540",
+                            "l": "3342.800",
+                            "c": "3357.190",
+                        },
+                    }
+                ],
+            },
+        )
+    )
+
+    response = client.get(
+        "/ohlc",
+        params={
+            "instrument": "XAU_USD",
+            "granularity": "H4",
+            "count": 1,
+            "format": "csv",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert response.headers["content-disposition"] == (
+        'inline; filename="XAU_USD-H4.csv"'
+    )
+    assert response.text == (
+        "instrument,granularity,time,open,high,low,close,volume,complete\n"
+        "XAU_USD,H4,2026-08-12T20:00:00Z,3348.210,3361.540,"
+        "3342.800,3357.190,123,false\n"
+    )
+    assert route.called
+    assert response.headers["Vercel-CDN-Cache-Control"]
+
+
+def test_get_ohlc_rejects_unknown_output_format(client: TestClient) -> None:
+    response = client.get(
+        "/ohlc",
+        params={
+            "instrument": "XAU_USD",
+            "granularity": "H4",
+            "format": "xml",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_get_ohlc_validates_instrument(client: TestClient) -> None:

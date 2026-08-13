@@ -30,6 +30,11 @@ class Granularity(StrEnum):
     M = "M"
 
 
+class OutputFormat(StrEnum):
+    JSON = "json"
+    CSV = "csv"
+
+
 class OhlcQuery(BaseModel):
     """Validated query modes for recent-count or explicit time-range requests."""
 
@@ -42,6 +47,12 @@ class OhlcQuery(BaseModel):
         examples=["XAU_USD"],
     )
     granularity: Granularity = Field(examples=["H4"])
+    output_format: OutputFormat = Field(
+        default=OutputFormat.JSON,
+        alias="format",
+        description="Response representation. JSON is the default.",
+        examples=["csv"],
+    )
     count: int | None = Field(
         default=None,
         ge=1,

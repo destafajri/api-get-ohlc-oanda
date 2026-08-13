@@ -1,12 +1,13 @@
 # OANDA OHLC API
 
-A production-minimal FastAPI service that fetches midpoint candlesticks from OANDA and returns a small, stable JSON shape over HTTP GET.
+A production-minimal FastAPI service that fetches midpoint candlesticks from OANDA and returns stable JSON or CSV over HTTP GET.
 
 ## Features
 
 - `GET /ohlc` with validated recent-count and historical time-range modes
 - async upstream calls with connection pooling and timeouts
 - normalized OHLC response; decimal prices remain strings to preserve precision
+- optional CSV output for AI tools, spreadsheets, and data pipelines
 - safe upstream error mapping without leaking credentials or raw auth details
 - `GET /health` liveness endpoint
 - crawler-readable home page, `robots.txt`, and sitemap for URL discovery
@@ -101,6 +102,30 @@ Example response:
 }
 ```
 
+## Usage: CSV output
+
+JSON remains the default. Add `format=csv` to receive the same normalized
+candles as `text/csv`:
+
+```bash
+curl --get 'http://localhost:8000/ohlc' \
+  --data-urlencode 'instrument=XAU_USD' \
+  --data-urlencode 'granularity=H4' \
+  --data-urlencode 'count=100' \
+  --data-urlencode 'format=csv'
+```
+
+Example CSV response:
+
+```csv
+instrument,granularity,time,open,high,low,close,volume,complete
+XAU_USD,H4,2026-08-12T20:00:00Z,3348.210,3361.540,3342.800,3357.190,1821,true
+```
+
+CSV responses use `Content-Type: text/csv; charset=utf-8` and include an
+inline filename such as `XAU_USD-H4.csv`. The `format` parameter works with
+both recent-count and time-range requests.
+
 Health check:
 
 ```bash
@@ -126,6 +151,7 @@ granularities, counts, and time ranges do not share a cached response.
 | --- | --- | --- |
 | `instrument` | uppercase OANDA pair with `_`, 3-20 characters | `XAU_USD` |
 | `granularity` | OANDA candle granularity from `S5` through `M` | `H4` |
+| `format` | optional response format: `json` (default) or `csv` | `csv` |
 | `count` | integer from 1 to 5000; defaults to 100 in latest-candles mode | `100` |
 | `from` | optional RFC3339 range start with timezone; enables range mode | `2026-05-12T00:00:00Z` |
 | `to` | optional RFC3339 range end with timezone; requires `from`; omitted means latest available data | `2026-08-12T23:59:59Z` |
@@ -140,6 +166,7 @@ Invalid requests are rejected locally with HTTP `422` before any request is sent
 - neither timestamp may be later than the server's current time.
 - `from` must be earlier than `to`.
 - `count` must be between 1 and 5000.
+- `format` must be either `json` or `csv`.
 - unknown query parameters are rejected to catch typos.
 
 Only midpoint (`M`) candles are requested. Incomplete candles are retained and marked with `complete: false`, allowing callers to decide whether to use them.
