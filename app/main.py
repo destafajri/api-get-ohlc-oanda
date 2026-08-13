@@ -15,8 +15,10 @@ from app.models import (
     HealthResponse,
     OhlcQuery,
     OhlcResponse,
+    OutputFormat,
 )
 from app.oanda import OandaService, OandaServiceError
+from app.serializers import ohlc_to_csv
 
 
 @asynccontextmanager
@@ -204,13 +206,29 @@ async def head_health() -> Response:
 @app.head("/ohlc", include_in_schema=False)
 async def head_ohlc(query: Annotated[OhlcQuery, Query()]) -> Response:
     """Validate an OHLC URL without calling OANDA or requiring credentials."""
-    return Response(status_code=200, media_type="application/json")
+    media_type = (
+        "text/csv" if query.output_format is OutputFormat.CSV else "application/json"
+    )
+    return Response(status_code=200, media_type=media_type)
 
 
 @app.get(
     "/ohlc",
     response_model=OhlcResponse,
     responses={
+        200: {
+            "description": "Normalized OHLC data as JSON or CSV.",
+            "content": {
+                "text/csv": {
+                    "schema": {"type": "string"},
+                    "example": (
+                        "instrument,granularity,time,open,high,low,close,volume,complete\n"
+                        "XAU_USD,H4,2026-08-12T20:00:00Z,3348.210,3361.540,"
+                        "3342.800,3357.190,1821,true\n"
+                    ),
+                }
+            },
+        },
         400: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         502: {"model": ErrorResponse},
@@ -223,7 +241,15 @@ async def get_ohlc(
     request: Request,
     query: Annotated[OhlcQuery, Query()],
     settings: Settings = Depends(get_settings),
-) -> OhlcResponse:
+) -> OhlcResponse | Response:
     """Return normalized midpoint OHLC candles from OANDA."""
     service = OandaService(request.app.state.http_client, settings)
-    return await service.get_ohlc(query)
+    result = await service.get_ohlc(query)
+    if query.output_format is OutputFormat.CSV:
+        filename = f"{result.instrument}-{result.granularity.value}.csv"
+        return Response(
+            content=ohlc_to_csv(result),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        )
+    return result
