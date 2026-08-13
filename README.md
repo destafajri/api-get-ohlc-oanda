@@ -10,6 +10,7 @@ A production-minimal FastAPI service that fetches midpoint candlesticks from OAN
 - safe upstream error mapping without leaking credentials or raw auth details
 - `GET /health` liveness endpoint
 - crawler-readable home page, `robots.txt`, and sitemap for URL discovery
+- PNG and ICO favicon assets served with long-lived browser/CDN caching
 - lightweight `HEAD` checks for `/`, `/health`, and `/ohlc`
 - short browser/CDN caching for successful OHLC responses
 - interactive OpenAPI docs at `/docs` and schema at `/openapi.json`

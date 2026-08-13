@@ -1,11 +1,12 @@
 from contextlib import asynccontextmanager
 from html import escape
+from pathlib import Path
 from typing import Annotated, AsyncIterator
 from uuid import uuid4
 
 import httpx
 from fastapi import Depends, FastAPI, Query, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
 from app.config import ConfigurationError, Settings, get_settings
 from app.models import (
@@ -43,6 +44,9 @@ OHLC_CDN_CACHE = (
 )
 DISCOVERY_BROWSER_CACHE = "public, max-age=300"
 DISCOVERY_CDN_CACHE = "public, max-age=86400, stale-while-revalidate=604800"
+FAVICON_BROWSER_CACHE = "public, max-age=604800, immutable"
+FAVICON_CDN_CACHE = "public, max-age=31536000, immutable"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 @app.middleware("http")
@@ -63,6 +67,13 @@ async def add_request_id(request: Request, call_next):  # type: ignore[no-untype
         response.headers["Cache-Control"] = DISCOVERY_BROWSER_CACHE
         response.headers["CDN-Cache-Control"] = DISCOVERY_CDN_CACHE
         response.headers["Vercel-CDN-Cache-Control"] = DISCOVERY_CDN_CACHE
+    elif response.status_code == 200 and request.url.path in {
+        "/favicon.ico",
+        "/favicon.png",
+    }:
+        response.headers["Cache-Control"] = FAVICON_BROWSER_CACHE
+        response.headers["CDN-Cache-Control"] = FAVICON_CDN_CACHE
+        response.headers["Vercel-CDN-Cache-Control"] = FAVICON_CDN_CACHE
 
     return response
 
@@ -105,6 +116,8 @@ async def root(request: Request) -> HTMLResponse:
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="index,follow">
     <link rel="canonical" href="{canonical_url}">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="icon" href="/favicon.ico" sizes="any">
     <title>OANDA OHLC API</title>
     <meta name="description" content="Public HTTP GET API for normalized OANDA OHLC candlestick data.">
   </head>
@@ -127,6 +140,26 @@ async def root(request: Request) -> HTMLResponse:
 @app.head("/", include_in_schema=False)
 async def head_root() -> Response:
     return Response(status_code=200, media_type="text/html")
+
+
+@app.api_route(
+    "/favicon.png",
+    methods=["GET", "HEAD"],
+    response_class=FileResponse,
+    include_in_schema=False,
+)
+async def favicon_png() -> FileResponse:
+    return FileResponse(STATIC_DIR / "favicon.png", media_type="image/png")
+
+
+@app.api_route(
+    "/favicon.ico",
+    methods=["GET", "HEAD"],
+    response_class=FileResponse,
+    include_in_schema=False,
+)
+async def favicon_ico() -> FileResponse:
+    return FileResponse(STATIC_DIR / "favicon.ico", media_type="image/x-icon")
 
 
 @app.get("/robots.txt", response_class=PlainTextResponse, include_in_schema=False)

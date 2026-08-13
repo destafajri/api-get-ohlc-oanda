@@ -16,7 +16,26 @@ def test_root_is_crawler_readable(client: TestClient) -> None:
     assert response.headers["content-type"].startswith("text/html")
     assert "OANDA OHLC API" in response.text
     assert "/ohlc?instrument=XAU_USD&amp;granularity=H4&amp;count=100" in response.text
+    assert 'href="/favicon.png"' in response.text
+    assert 'href="/favicon.ico"' in response.text
     assert response.headers["Cache-Control"].startswith("public")
+
+
+def test_favicons_are_available_and_cacheable(client: TestClient) -> None:
+    png = client.get("/favicon.png")
+    ico = client.get("/favicon.ico")
+
+    assert png.status_code == 200
+    assert png.headers["content-type"] == "image/png"
+    assert png.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert png.headers["Cache-Control"] == "public, max-age=604800, immutable"
+    assert ico.status_code == 200
+    assert ico.headers["content-type"] == "image/x-icon"
+    assert ico.content.startswith(b"\x00\x00\x01\x00")
+    assert ico.headers["Cache-Control"] == "public, max-age=604800, immutable"
+
+    assert client.head("/favicon.png").status_code == 200
+    assert client.head("/favicon.ico").status_code == 200
 
 
 def test_discovery_files_are_available(client: TestClient) -> None:
