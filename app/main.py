@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
+from html import escape
 from typing import Annotated, AsyncIterator
 from uuid import uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, Query, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from app.config import ConfigurationError, Settings, get_settings
 from app.models import (
@@ -36,12 +37,33 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+OHLC_BROWSER_CACHE = "public, max-age=30, stale-while-revalidate=30"
+OHLC_CDN_CACHE = (
+    "public, max-age=60, stale-while-revalidate=300, stale-if-error=86400"
+)
+DISCOVERY_BROWSER_CACHE = "public, max-age=300"
+DISCOVERY_CDN_CACHE = "public, max-age=86400, stale-while-revalidate=604800"
+
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):  # type: ignore[no-untyped-def]
     request_id = request.headers.get("X-Request-ID", str(uuid4()))
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
+
+    if response.status_code == 200 and request.url.path == "/ohlc":
+        response.headers["Cache-Control"] = OHLC_BROWSER_CACHE
+        response.headers["CDN-Cache-Control"] = OHLC_CDN_CACHE
+        response.headers["Vercel-CDN-Cache-Control"] = OHLC_CDN_CACHE
+    elif response.status_code == 200 and request.url.path in {
+        "/",
+        "/robots.txt",
+        "/sitemap.xml",
+    }:
+        response.headers["Cache-Control"] = DISCOVERY_BROWSER_CACHE
+        response.headers["CDN-Cache-Control"] = DISCOVERY_CDN_CACHE
+        response.headers["Vercel-CDN-Cache-Control"] = DISCOVERY_CDN_CACHE
+
     return response
 
 
@@ -66,10 +88,90 @@ async def configuration_error_handler(
     return JSONResponse(status_code=503, content=body.model_dump())
 
 
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def root(request: Request) -> HTMLResponse:
+    """Human- and crawler-readable entry point for the public API."""
+    base_url = str(request.base_url).rstrip("/")
+    canonical_url = escape(f"{base_url}/", quote=True)
+    example_url = escape(
+        f"{base_url}/ohlc?instrument=XAU_USD&granularity=H4&count=100",
+        quote=True,
+    )
+    return HTMLResponse(
+        content=f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="index,follow">
+    <link rel="canonical" href="{canonical_url}">
+    <title>OANDA OHLC API</title>
+    <meta name="description" content="Public HTTP GET API for normalized OANDA OHLC candlestick data.">
+  </head>
+  <body>
+    <main>
+      <h1>OANDA OHLC API</h1>
+      <p>Fetch normalized midpoint candlesticks from OANDA over HTTP GET.</p>
+      <ul>
+        <li><a href="{example_url}">Example: XAU_USD H4, latest 100 candles</a></li>
+        <li><a href="/docs">Interactive API documentation</a></li>
+        <li><a href="/openapi.json">OpenAPI schema</a></li>
+        <li><a href="/health">Health check</a></li>
+      </ul>
+    </main>
+  </body>
+</html>"""
+    )
+
+
+@app.head("/", include_in_schema=False)
+async def head_root() -> Response:
+    return Response(status_code=200, media_type="text/html")
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse, include_in_schema=False)
+async def robots(request: Request) -> PlainTextResponse:
+    sitemap_url = request.url_for("sitemap")
+    return PlainTextResponse(
+        f"User-agent: *\nAllow: /\n\nSitemap: {sitemap_url}\n"
+    )
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+async def sitemap(request: Request) -> Response:
+    base_url = str(request.base_url).rstrip("/")
+    urls = [
+        f"{base_url}/",
+        f"{base_url}/docs",
+        f"{base_url}/openapi.json",
+        f"{base_url}/ohlc?instrument=XAU_USD&granularity=H4&count=100",
+    ]
+    entries = "".join(
+        f"<url><loc>{escape(url)}</loc></url>" for url in urls
+    )
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        f"{entries}</urlset>"
+    )
+    return Response(content=body, media_type="application/xml")
+
+
 @app.get("/health", response_model=HealthResponse, tags=["system"])
 async def health() -> HealthResponse:
     """Liveness check. This does not call OANDA or reveal configuration."""
     return HealthResponse()
+
+
+@app.head("/health", include_in_schema=False)
+async def head_health() -> Response:
+    return Response(status_code=200, media_type="application/json")
+
+
+@app.head("/ohlc", include_in_schema=False)
+async def head_ohlc(query: Annotated[OhlcQuery, Query()]) -> Response:
+    """Validate an OHLC URL without calling OANDA or requiring credentials."""
+    return Response(status_code=200, media_type="application/json")
 
 
 @app.get(

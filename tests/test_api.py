@@ -9,12 +9,61 @@ from app.config import get_settings
 from app.main import app
 
 
+def test_root_is_crawler_readable(client: TestClient) -> None:
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "OANDA OHLC API" in response.text
+    assert "/ohlc?instrument=XAU_USD&amp;granularity=H4&amp;count=100" in response.text
+    assert response.headers["Cache-Control"].startswith("public")
+
+
+def test_discovery_files_are_available(client: TestClient) -> None:
+    robots = client.get("/robots.txt")
+    sitemap = client.get("/sitemap.xml")
+
+    assert robots.status_code == 200
+    assert "User-agent: *" in robots.text
+    assert "Allow: /" in robots.text
+    assert "Sitemap:" in robots.text
+    assert sitemap.status_code == 200
+    assert sitemap.headers["content-type"].startswith("application/xml")
+    assert "/ohlc?instrument=XAU_USD&amp;granularity=H4&amp;count=100" in sitemap.text
+
+
 def test_health_does_not_require_oanda(client: TestClient) -> None:
     response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
     assert response.headers["X-Request-ID"]
+
+
+def test_head_checks_do_not_require_oanda(client: TestClient) -> None:
+    root = client.head("/")
+    health = client.head("/health")
+    ohlc = client.head(
+        "/ohlc", params={"instrument": "XAU_USD", "granularity": "H4", "count": 100}
+    )
+
+    assert root.status_code == 200
+    assert root.content == b""
+    assert health.status_code == 200
+    assert health.content == b""
+    assert ohlc.status_code == 200
+    assert ohlc.content == b""
+    assert ohlc.headers["content-type"].startswith("application/json")
+    assert ohlc.headers["Cache-Control"].startswith("public")
+    assert ohlc.headers["Vercel-CDN-Cache-Control"]
+
+
+def test_head_ohlc_reuses_query_validation(client: TestClient) -> None:
+    response = client.head(
+        "/ohlc", params={"instrument": "xauusd", "granularity": "H4"}
+    )
+
+    assert response.status_code == 422
 
 
 def test_openapi_docs_are_available(client: TestClient) -> None:
@@ -88,6 +137,11 @@ def test_get_ohlc_normalizes_oanda_response(client: TestClient) -> None:
     assert route.called
     assert route.calls.last.request.headers["Authorization"] == "Bearer test-token"
     assert route.calls.last.request.url.params["price"] == "M"
+    assert response.headers["Cache-Control"] == (
+        "public, max-age=30, stale-while-revalidate=30"
+    )
+    assert response.headers["CDN-Cache-Control"]
+    assert response.headers["Vercel-CDN-Cache-Control"]
 
 
 def test_get_ohlc_validates_instrument(client: TestClient) -> None:

@@ -9,6 +9,9 @@ A production-minimal FastAPI service that fetches midpoint candlesticks from OAN
 - normalized OHLC response; decimal prices remain strings to preserve precision
 - safe upstream error mapping without leaking credentials or raw auth details
 - `GET /health` liveness endpoint
+- crawler-readable home page, `robots.txt`, and sitemap for URL discovery
+- lightweight `HEAD` checks for `/`, `/health`, and `/ohlc`
+- short browser/CDN caching for successful OHLC responses
 - interactive OpenAPI docs at `/docs` and schema at `/openapi.json`
 - environment-based OANDA practice/live configuration
 
@@ -102,6 +105,19 @@ Health check:
 ```bash
 curl 'http://localhost:8000/health'
 ```
+
+URL preflight checks can use `HEAD` without contacting OANDA or requiring the
+OANDA token to be loaded:
+
+```bash
+curl --head 'http://localhost:8000/ohlc?instrument=XAU_USD&granularity=H4&count=100'
+```
+
+The application returns a crawler-readable landing page at `/`, allows public
+crawling through `/robots.txt`, and publishes `/sitemap.xml`. Successful OHLC
+responses are cached in browsers for 30 seconds and at the CDN edge for 60
+seconds. Query parameters are part of the cache key, so different instruments,
+granularities, counts, and time ranges do not share a cached response.
 
 ## Supported query parameters
 
