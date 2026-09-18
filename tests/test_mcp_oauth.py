@@ -85,7 +85,7 @@ def test_oauth_protected_resource_metadata_is_advertised() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "resource": PUBLIC_URL,
-        "authorization_servers": [ISSUER_URL + "/"],
+        "authorization_servers": [ISSUER_URL],
         "bearer_methods_supported": ["header"],
         "scopes_supported": ["openid"],
     }
