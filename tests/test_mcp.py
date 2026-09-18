@@ -20,6 +20,9 @@ def configured_environment(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("OANDA_TOKEN", "test-token")
     monkeypatch.setenv("OANDA_ENVIRONMENT", "practice")
     monkeypatch.setenv("MCP_AUTH_TOKEN", "mcp-test-token")
+    monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
+    monkeypatch.delenv("MCP_OAUTH_ISSUER_URL", raising=False)
+    monkeypatch.delenv("MCP_OAUTH_JWKS_URL", raising=False)
     get_settings.cache_clear()
     get_mcp_settings.cache_clear()
     yield
@@ -159,7 +162,7 @@ def test_streamable_http_endpoint_initializes_with_bearer_auth() -> None:
 
     with TestClient(http_app, base_url="http://localhost") as client:
         response = client.post(
-            "/",
+            "/mcp/",
             json=_initialize_payload(),
             headers={
                 "Authorization": "Bearer mcp-test-token",
@@ -198,7 +201,7 @@ def test_streamable_http_endpoint_rejects_untrusted_origin() -> None:
 
     with TestClient(http_app, base_url="http://localhost") as client:
         response = client.post(
-            "/",
+            "/mcp/",
             json=_initialize_payload(),
             headers={
                 "Authorization": "Bearer mcp-test-token",
@@ -216,7 +219,7 @@ def test_streamable_http_endpoint_rejects_unauthorized_requests() -> None:
 
     with TestClient(http_app, base_url="http://localhost") as client:
         response = client.post(
-            "/",
+            "/mcp/",
             json=_initialize_payload(),
             headers={
                 "Authorization": "Bearer wrong-token",
@@ -239,7 +242,7 @@ def test_streamable_http_endpoint_fails_closed_with_empty_auth_token(
 
     with TestClient(http_app, base_url="http://localhost") as client:
         response = client.post(
-            "/",
+            "/mcp/",
             json=_initialize_payload(),
             headers={"Accept": "application/json, text/event-stream"},
         )
@@ -258,7 +261,7 @@ def test_streamable_http_endpoint_fails_closed_without_auth_token(
 
     with TestClient(http_app, base_url="http://localhost") as client:
         response = client.post(
-            "/",
+            "/mcp/",
             json=_initialize_payload(),
             headers={"Accept": "application/json, text/event-stream"},
         )

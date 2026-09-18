@@ -10,10 +10,12 @@ from typing import Annotated, Literal
 
 import httpx
 from mcp.server import MCPServer
+from mcp.server.auth.provider import TokenVerifier
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import AnyHttpUrl, BaseModel, Field, ValidationError
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -25,6 +27,7 @@ from app.config import (
     get_settings,
 )
 from app.http_client import create_http_client
+from app.mcp_auth import CompositeTokenVerifier, McpOAuthConfigurationError
 from app.models import Candle, Granularity, OhlcQuery
 from app.oanda import OandaService, OandaServiceError
 
@@ -64,9 +67,15 @@ def _validation_message(exc: ValidationError) -> str:
     return "; ".join(messages)
 
 
-def create_mcp_server() -> MCPServer:
+def create_mcp_server(
+    *,
+    auth: AuthSettings | None = None,
+    token_verifier: TokenVerifier | None = None,
+) -> MCPServer:
     server = MCPServer(
         "OANDA OHLC MCP",
+        auth=auth,
+        token_verifier=token_verifier,
         instructions=(
             "Use get_ohlc to retrieve normalized midpoint candlestick data from OANDA. "
             "Use count for recent candles, or start_time/end_time for historical ranges."
@@ -160,6 +169,35 @@ def create_mcp_server() -> MCPServer:
     return server
 
 
+def create_runtime_mcp_server(settings: McpSettings) -> MCPServer:
+    """Create a fresh HTTP runtime server for one ASGI application lifespan."""
+
+    try:
+        oauth_values = _oauth_values(settings)
+    except McpOAuthConfigurationError:
+        # Keep the REST API available. build_mcp_http_app() will expose a
+        # fail-closed 503 for MCP while still initializing the session manager.
+        return create_mcp_server()
+
+    if oauth_values is None:
+        return create_mcp_server()
+
+    public_url, issuer_url, jwks_url = oauth_values
+    token_verifier = CompositeTokenVerifier(
+        issuer_url=issuer_url,
+        resource_url=public_url,
+        jwks_url=jwks_url,
+        static_token=settings.mcp_auth_token,
+    )
+    auth = AuthSettings(
+        issuer_url=issuer_url,
+        resource_server_url=public_url,
+        required_scopes=["openid"],
+        validate_token_resource=True,
+    )
+    return create_mcp_server(auth=auth, token_verifier=token_verifier)
+
+
 def _csv_values(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
@@ -187,6 +225,8 @@ def _allowed_hosts(settings: McpSettings) -> list[str]:
         *_vercel_hosts(),
         *_csv_values(settings.mcp_allowed_hosts),
     }
+    if settings.mcp_public_url is not None and settings.mcp_public_url.host:
+        hosts.add(settings.mcp_public_url.host)
     return sorted(hosts)
 
 
@@ -198,6 +238,10 @@ def _allowed_origins(settings: McpSettings) -> list[str]:
         *(f"https://{host}" for host in _vercel_hosts()),
         *_csv_values(settings.mcp_allowed_origins),
     }
+    if settings.mcp_public_url is not None and settings.mcp_public_url.host:
+        origins.add(
+            f"{settings.mcp_public_url.scheme}://{settings.mcp_public_url.host}"
+        )
     return sorted(origins)
 
 
@@ -206,10 +250,48 @@ def _cors_origins(settings: McpSettings) -> list[str]:
         *(f"https://{host}" for host in _vercel_hosts()),
         *_csv_values(settings.mcp_allowed_origins),
     }
+    if settings.mcp_public_url is not None and settings.mcp_public_url.host:
+        origins.add(
+            f"{settings.mcp_public_url.scheme}://{settings.mcp_public_url.host}"
+        )
     return sorted(origins)
 
 
+def _oauth_values(settings: McpSettings) -> tuple[AnyHttpUrl, AnyHttpUrl, AnyHttpUrl] | None:
+    values = (
+        settings.mcp_public_url,
+        settings.mcp_oauth_issuer_url,
+        settings.mcp_oauth_jwks_url,
+    )
+    configured = [value is not None for value in values]
+    if any(configured) and not all(configured):
+        raise McpOAuthConfigurationError(
+            "MCP_PUBLIC_URL, MCP_OAUTH_ISSUER_URL, and MCP_OAUTH_JWKS_URL "
+            "must be configured together."
+        )
+    if not any(configured):
+        return None
+
+    public_url, issuer_url, jwks_url = values
+    assert public_url is not None
+    assert issuer_url is not None
+    assert jwks_url is not None
+
+    if any(url.scheme != "https" for url in (public_url, issuer_url, jwks_url)):
+        raise McpOAuthConfigurationError(
+            "MCP OAuth URLs must use HTTPS."
+        )
+    if public_url.path.rstrip("/") != "/mcp" or public_url.query or public_url.fragment:
+        raise McpOAuthConfigurationError(
+            "MCP_PUBLIC_URL must be the canonical HTTPS /mcp/ endpoint "
+            "without query parameters or a fragment."
+        )
+    return public_url, issuer_url, jwks_url
+
+
 class McpBearerAuthMiddleware:
+    """Static Bearer compatibility mode used when OAuth is not configured."""
+
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
@@ -238,10 +320,7 @@ class McpBearerAuthMiddleware:
             await response(scope, receive, send)
             return
 
-        headers = {
-            key.lower(): value
-            for key, value in scope.get("headers", [])
-        }
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
         supplied = headers.get(b"authorization", b"").decode("latin-1")
         expected = f"Bearer {token_value}"
 
@@ -257,30 +336,83 @@ class McpBearerAuthMiddleware:
             await response(scope, receive, send)
             return
 
+        await self.app(scope, receive, send)
+
+
+class NoStoreMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
         async def send_no_store(message: dict) -> None:
             if message["type"] == "http.response.start":
-                mutable_headers = list(message.get("headers", []))
-                mutable_headers.append((b"cache-control", b"no-store"))
-                message["headers"] = mutable_headers
+                headers = [
+                    (key, value)
+                    for key, value in message.get("headers", [])
+                    if key.lower() != b"cache-control"
+                ]
+                headers.append((b"cache-control", b"no-store"))
+                message["headers"] = headers
             await send(message)
 
         await self.app(scope, receive, send_no_store)
 
 
-def build_mcp_http_app(server: MCPServer) -> ASGIApp:
-    settings = get_mcp_settings()
+class MisconfiguredMcpApp:
+    def __init__(self, app: ASGIApp, message: str) -> None:
+        self.app = app
+        self.message = message
+
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        if scope["type"] == "lifespan":
+            await self.app(scope, receive, send)
+            return
+        response = JSONResponse(
+            {
+                "error": "mcp_auth_not_configured",
+                "message": self.message,
+            },
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+        )
+        await response(scope, receive, send)
+
+
+def build_mcp_http_app(
+    server: MCPServer,
+    settings: McpSettings | None = None,
+) -> ASGIApp:
+    settings = settings or get_mcp_settings()
     transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=_allowed_hosts(settings),
         allowed_origins=_allowed_origins(settings),
     )
+
+    oauth_error: McpOAuthConfigurationError | None = None
+    try:
+        oauth_values = _oauth_values(settings)
+    except McpOAuthConfigurationError as exc:
+        oauth_values = None
+        oauth_error = exc
+
     app: ASGIApp = server.streamable_http_app(
-        streamable_http_path="/",
+        streamable_http_path="/mcp/",
         stateless_http=True,
         json_response=True,
         transport_security=transport_security,
     )
-    app = McpBearerAuthMiddleware(app)
+
+    if oauth_error is not None:
+        app = MisconfiguredMcpApp(app, str(oauth_error))
+    elif oauth_values is None:
+        app = McpBearerAuthMiddleware(app)
+
+    app = NoStoreMiddleware(app)
 
     cors_origins = _cors_origins(settings)
     if cors_origins:
@@ -289,13 +421,13 @@ def build_mcp_http_app(server: MCPServer) -> ASGIApp:
             allow_origins=cors_origins,
             allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
             allow_headers=["*"],
-            expose_headers=["Mcp-Session-Id"],
+            expose_headers=["Mcp-Session-Id", "WWW-Authenticate"],
         )
     return app
 
 
 class McpMount:
-    """Mutable ASGI mount target rebuilt for each host-app lifespan."""
+    """Mutable ASGI fallback target rebuilt for each host-app lifespan."""
 
     def __init__(self) -> None:
         self._app: ASGIApp | None = None

@@ -7,9 +7,9 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
-from app.config import ConfigurationError, Settings, get_settings
+from app.config import ConfigurationError, Settings, get_mcp_settings, get_settings
 from app.http_client import create_http_client
-from app.mcp_server import build_mcp_http_app, mcp_mount, mcp_server
+from app.mcp_server import build_mcp_http_app, create_runtime_mcp_server, mcp_mount
 from app.models import (
     ErrorDetail,
     ErrorResponse,
@@ -25,9 +25,11 @@ from app.serializers import ohlc_to_csv
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.http_client = create_http_client()
-    mcp_mount.set_app(build_mcp_http_app(mcp_server))
+    mcp_settings = get_mcp_settings()
+    runtime_mcp_server = create_runtime_mcp_server(mcp_settings)
+    mcp_mount.set_app(build_mcp_http_app(runtime_mcp_server, mcp_settings))
     try:
-        async with mcp_server.session_manager.run():
+        async with runtime_mcp_server.session_manager.run():
             yield
     finally:
         mcp_mount.set_app(None)
@@ -40,8 +42,6 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
-app.mount("/mcp", mcp_mount, name="mcp")
-
 OHLC_BROWSER_CACHE = "public, max-age=30, stale-while-revalidate=30"
 OHLC_CDN_CACHE = (
     "public, max-age=60, stale-while-revalidate=300, stale-if-error=86400"
@@ -255,3 +255,8 @@ async def get_ohlc(
             headers={"Content-Disposition": f'inline; filename="{filename}"'},
         )
     return result
+
+
+# Keep this fallback mount last so the existing REST/docs routes retain priority.
+# The MCP sub-application owns /mcp/ plus OAuth discovery metadata routes.
+app.mount("/", mcp_mount, name="mcp")
