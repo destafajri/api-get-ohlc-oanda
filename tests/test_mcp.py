@@ -229,6 +229,25 @@ def test_streamable_http_endpoint_rejects_unauthorized_requests() -> None:
     assert response.json() == {"error": "unauthorized"}
 
 
+def test_streamable_http_endpoint_fails_closed_with_empty_auth_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_AUTH_TOKEN", "")
+    get_mcp_settings.cache_clear()
+    server = create_mcp_server()
+    http_app = build_mcp_http_app(server)
+
+    with TestClient(http_app, base_url="http://localhost") as client:
+        response = client.post(
+            "/",
+            json=_initialize_payload(),
+            headers={"Accept": "application/json, text/event-stream"},
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {"error": "mcp_auth_not_configured"}
+
+
 def test_streamable_http_endpoint_fails_closed_without_auth_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
