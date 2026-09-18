@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from httpx import Response
 
 from app.config import get_mcp_settings
+from app.main import app as fastapi_app
 from app.mcp_server import build_mcp_http_app, create_runtime_mcp_server
 
 
@@ -88,6 +89,38 @@ def test_oauth_protected_resource_metadata_is_advertised() -> None:
         "bearer_methods_supported": ["header"],
         "scopes_supported": [],
     }
+
+
+def test_fastapi_mount_exposes_oauth_metadata() -> None:
+    with TestClient(fastapi_app, base_url="https://api.example.com") as client:
+        response = client.get("/.well-known/oauth-protected-resource/mcp/")
+
+    assert response.status_code == 200
+    assert response.json()["resource"] == PUBLIC_URL
+
+
+def test_partial_oauth_configuration_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
+    monkeypatch.delenv("MCP_OAUTH_JWKS_URL", raising=False)
+    get_mcp_settings.cache_clear()
+    settings = get_mcp_settings()
+    server = create_runtime_mcp_server(settings)
+    http_app = build_mcp_http_app(server, settings)
+
+    with TestClient(http_app, base_url="https://api.example.com") as client:
+        response = client.post(
+            "/mcp/",
+            json=_initialize_payload(),
+            headers={
+                "Authorization": "Bearer legacy-static-token",
+                "Accept": "application/json, text/event-stream",
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "mcp_auth_not_configured"
 
 
 def test_oauth_challenge_points_to_resource_metadata() -> None:
