@@ -123,6 +123,29 @@ def test_partial_oauth_configuration_fails_closed(
     assert response.json()["error"] == "mcp_auth_not_configured"
 
 
+def test_oauth_configuration_rejects_insecure_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_OAUTH_ISSUER_URL", "http://auth.example.com")
+    get_mcp_settings.cache_clear()
+    settings = get_mcp_settings()
+    server = create_runtime_mcp_server(settings)
+    http_app = build_mcp_http_app(server, settings)
+
+    with TestClient(http_app, base_url="https://api.example.com") as client:
+        response = client.post(
+            "/mcp/",
+            json=_initialize_payload(),
+            headers={
+                "Authorization": "Bearer legacy-static-token",
+                "Accept": "application/json, text/event-stream",
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "mcp_auth_not_configured"
+
+
 def test_oauth_challenge_points_to_resource_metadata() -> None:
     with TestClient(_oauth_app(), base_url="https://api.example.com") as client:
         response = client.post(
