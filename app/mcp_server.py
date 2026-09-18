@@ -192,7 +192,7 @@ def create_runtime_mcp_server(settings: McpSettings) -> MCPServer:
     auth = AuthSettings(
         issuer_url=issuer_url,
         resource_server_url=public_url,
-        required_scopes=[],
+        required_scopes=["openid"],
         validate_token_resource=True,
     )
     return create_mcp_server(auth=auth, token_verifier=token_verifier)
