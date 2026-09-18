@@ -5,15 +5,18 @@ from pydantic import Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
-    """Application settings loaded only from environment variables or .env."""
+SETTINGS_CONFIG = SettingsConfigDict(
+    env_file=".env",
+    env_file_encoding="utf-8",
+    extra="ignore",
+    case_sensitive=False,
+)
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-        case_sensitive=False,
-    )
+
+class Settings(BaseSettings):
+    """OANDA application settings loaded from environment variables or .env."""
+
+    model_config = SETTINGS_CONFIG
 
     oanda_token: Annotated[SecretStr, Field(min_length=1)]
     oanda_environment: Literal["practice", "live"] = "practice"
@@ -29,12 +32,27 @@ class Settings(BaseSettings):
         return f"https://{host}/v3"
 
 
+class McpSettings(BaseSettings):
+    """Remote MCP transport and access settings."""
+
+    model_config = SETTINGS_CONFIG
+
+    mcp_auth_token: SecretStr | None = None
+    mcp_allowed_hosts: str = ""
+    mcp_allowed_origins: str = ""
+
+
 @lru_cache
 def get_settings() -> Settings:
     try:
         return Settings()  # type: ignore[call-arg]
     except ValidationError as exc:
         raise ConfigurationError from exc
+
+
+@lru_cache
+def get_mcp_settings() -> McpSettings:
+    return McpSettings()
 
 
 class ConfigurationError(RuntimeError):

@@ -4,11 +4,12 @@ from pathlib import Path
 from typing import Annotated, AsyncIterator
 from uuid import uuid4
 
-import httpx
 from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
 from app.config import ConfigurationError, Settings, get_settings
+from app.http_client import create_http_client
+from app.mcp_server import build_mcp_http_app, mcp_mount, mcp_server
 from app.models import (
     ErrorDetail,
     ErrorResponse,
@@ -23,13 +24,13 @@ from app.serializers import ohlc_to_csv
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    app.state.http_client = httpx.AsyncClient(
-        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
-        follow_redirects=False,
-    )
+    app.state.http_client = create_http_client()
+    mcp_mount.set_app(build_mcp_http_app(mcp_server))
     try:
-        yield
+        async with mcp_server.session_manager.run():
+            yield
     finally:
+        mcp_mount.set_app(None)
         await app.state.http_client.aclose()
 
 
@@ -39,6 +40,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.mount("/mcp", mcp_mount, name="mcp")
 
 OHLC_BROWSER_CACHE = "public, max-age=30, stale-while-revalidate=30"
 OHLC_CDN_CACHE = (
