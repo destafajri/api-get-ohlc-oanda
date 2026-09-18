@@ -35,7 +35,10 @@ class Settings(BaseSettings):
 class McpSettings(BaseSettings):
     """Remote MCP transport and access settings."""
 
-    model_config = SETTINGS_CONFIG
+    model_config = SettingsConfigDict(
+        **SETTINGS_CONFIG,
+        url_preserve_empty_path=True,
+    )
 
     # Legacy/static Bearer access for clients such as Codex and Claude Code.
     mcp_auth_token: SecretStr | None = None
