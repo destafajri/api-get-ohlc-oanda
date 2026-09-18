@@ -183,6 +183,7 @@ def test_fastapi_mount_exposes_mcp_endpoint(client: TestClient) -> None:
         headers={
             "Authorization": "Bearer mcp-test-token",
             "Accept": "application/json, text/event-stream",
+            "Host": "localhost",
         },
     )
 
