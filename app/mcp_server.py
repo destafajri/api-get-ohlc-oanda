@@ -140,7 +140,7 @@ def create_mcp_server() -> MCPServer:
                 "OANDA configuration is missing or invalid on the MCP server."
             ) from exc
 
-        service = OandaService(ctx.lifespan.http_client, settings)
+        service = OandaService(ctx.request_context.lifespan_context.http_client, settings)
         try:
             result = await service.get_ohlc(query)
         except OandaServiceError as exc:
