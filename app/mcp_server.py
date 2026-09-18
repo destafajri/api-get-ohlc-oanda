@@ -226,7 +226,10 @@ class McpBearerAuthMiddleware:
 
         settings = get_mcp_settings()
         configured_token = settings.mcp_auth_token
-        if configured_token is None:
+        token_value = (
+            configured_token.get_secret_value() if configured_token is not None else ""
+        )
+        if not token_value:
             response = JSONResponse(
                 {"error": "mcp_auth_not_configured"},
                 status_code=503,
@@ -240,7 +243,7 @@ class McpBearerAuthMiddleware:
             for key, value in scope.get("headers", [])
         }
         supplied = headers.get(b"authorization", b"").decode("latin-1")
-        expected = f"Bearer {configured_token.get_secret_value()}"
+        expected = f"Bearer {token_value}"
 
         if not compare_digest(supplied, expected):
             response = JSONResponse(
