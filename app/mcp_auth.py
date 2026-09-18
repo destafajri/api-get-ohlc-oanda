@@ -43,7 +43,7 @@ class CompositeTokenVerifier(TokenVerifier):
             return AccessToken(
                 token=token,
                 client_id="static-bearer",
-                scopes=[],
+                scopes=["openid"],
                 resource=self.resource_url,
                 subject="static-bearer",
                 claims={"iss": self.issuer_url},
