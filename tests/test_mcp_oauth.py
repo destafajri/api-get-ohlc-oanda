@@ -99,6 +99,14 @@ def test_fastapi_mount_exposes_oauth_metadata() -> None:
     assert response.json()["resource"] == PUBLIC_URL
 
 
+def test_existing_health_route_remains_available_in_oauth_mode() -> None:
+    with TestClient(fastapi_app, base_url="https://api.example.com") as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
 def test_partial_oauth_configuration_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
