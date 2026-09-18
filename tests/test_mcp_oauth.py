@@ -86,6 +86,7 @@ def test_oauth_protected_resource_metadata_is_advertised() -> None:
         "resource": PUBLIC_URL,
         "authorization_servers": [ISSUER_URL + "/"],
         "bearer_methods_supported": ["header"],
+        "scopes_supported": [],
     }
 
 
