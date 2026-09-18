@@ -106,6 +106,24 @@ async def test_get_ohlc_tool_reuses_oanda_service_and_returns_structured_data() 
 
 
 @pytest.mark.anyio
+@respx.mock
+async def test_get_ohlc_tool_returns_safe_upstream_error() -> None:
+    respx.get(
+        "https://api-fxpractice.oanda.com/v3/instruments/XAU_USD/candles"
+    ).mock(return_value=Response(401, json={"errorMessage": "sensitive upstream detail"}))
+
+    async with Client(mcp_server) as client:
+        result = await client.call_tool(
+            "get_ohlc",
+            {"instrument": "XAU_USD", "granularity": "H4", "count": 1},
+        )
+
+    assert result.is_error is True
+    assert "oanda_authentication_failed: OANDA authentication failed." in result.content[0].text
+    assert "sensitive upstream detail" not in result.content[0].text
+
+
+@pytest.mark.anyio
 async def test_get_ohlc_tool_returns_actionable_validation_error() -> None:
     async with Client(mcp_server) as client:
         result = await client.call_tool(
@@ -155,6 +173,40 @@ def test_streamable_http_endpoint_initializes_with_bearer_auth() -> None:
     assert payload["id"] == 1
     assert payload["result"]["serverInfo"]["name"] == "OANDA OHLC MCP"
     assert response.headers["Cache-Control"] == "no-store"
+    assert "Mcp-Session-Id" not in response.headers
+
+
+def test_fastapi_mount_exposes_mcp_endpoint(client: TestClient) -> None:
+    response = client.post(
+        "/mcp/",
+        json=_initialize_payload(),
+        headers={
+            "Authorization": "Bearer mcp-test-token",
+            "Accept": "application/json, text/event-stream",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["result"]["serverInfo"]["name"] == "OANDA OHLC MCP"
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_streamable_http_endpoint_rejects_untrusted_origin() -> None:
+    server = create_mcp_server()
+    http_app = build_mcp_http_app(server)
+
+    with TestClient(http_app, base_url="http://localhost") as client:
+        response = client.post(
+            "/",
+            json=_initialize_payload(),
+            headers={
+                "Authorization": "Bearer mcp-test-token",
+                "Accept": "application/json, text/event-stream",
+                "Origin": "https://evil.example",
+            },
+        )
+
+    assert response.status_code == 403
 
 
 def test_streamable_http_endpoint_rejects_unauthorized_requests() -> None:
