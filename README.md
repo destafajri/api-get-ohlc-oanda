@@ -310,8 +310,10 @@ receives them.
 ### Connect from ChatGPT
 
 ChatGPT's OAuth connection requires a standards-compatible authorization
-server in addition to this MCP resource server. The implementation is provider
-agnostic. A practical example is WorkOS AuthKit because it provides MCP OAuth
+server in addition to this MCP resource server. The resource-server integration
+is provider-agnostic at the MCP/OAuth protocol level; the current JWT verifier
+accepts RS256-signed access tokens. A practical example is WorkOS AuthKit
+because it issues RS256 access tokens and provides MCP OAuth
 authorization-server metadata, PKCE, Client ID Metadata Document (CIMD),
 Dynamic Client Registration (DCR) compatibility, Resource Indicators, and a
 JWKS endpoint.
