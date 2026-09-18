@@ -30,7 +30,7 @@ class CompositeTokenVerifier(TokenVerifier):
         jwks_url: AnyHttpUrl,
         static_token: SecretStr | None = None,
     ) -> None:
-        self.issuer_url = str(issuer_url).rstrip("/")
+        self.issuer_url = str(issuer_url)
         self.resource_url = str(resource_url)
         self.jwks_url = str(jwks_url)
         self.static_token = static_token
