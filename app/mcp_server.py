@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 
 import httpx
 from mcp.server import MCPServer
+from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
@@ -66,9 +67,15 @@ def _validation_message(exc: ValidationError) -> str:
     return "; ".join(messages)
 
 
-def create_mcp_server() -> MCPServer:
+def create_mcp_server(
+    *,
+    auth: AuthSettings | None = None,
+    token_verifier: TokenVerifier | None = None,
+) -> MCPServer:
     server = MCPServer(
         "OANDA OHLC MCP",
+        auth=auth,
+        token_verifier=token_verifier,
         instructions=(
             "Use get_ohlc to retrieve normalized midpoint candlestick data from OANDA. "
             "Use count for recent candles, or start_time/end_time for historical ranges."
@@ -162,10 +169,33 @@ def create_mcp_server() -> MCPServer:
     return server
 
 
-def create_runtime_mcp_server(_settings: McpSettings) -> MCPServer:
+def create_runtime_mcp_server(settings: McpSettings) -> MCPServer:
     """Create a fresh HTTP runtime server for one ASGI application lifespan."""
 
-    return create_mcp_server()
+    try:
+        oauth_values = _oauth_values(settings)
+    except McpOAuthConfigurationError:
+        # Keep the REST API available. build_mcp_http_app() will expose a
+        # fail-closed 503 for MCP while still initializing the session manager.
+        return create_mcp_server()
+
+    if oauth_values is None:
+        return create_mcp_server()
+
+    public_url, issuer_url, jwks_url = oauth_values
+    token_verifier = CompositeTokenVerifier(
+        issuer_url=issuer_url,
+        resource_url=public_url,
+        jwks_url=jwks_url,
+        static_token=settings.mcp_auth_token,
+    )
+    auth = AuthSettings(
+        issuer_url=issuer_url,
+        resource_server_url=public_url,
+        required_scopes=[],
+        validate_token_resource=True,
+    )
+    return create_mcp_server(auth=auth, token_verifier=token_verifier)
 
 
 def _csv_values(value: str) -> list[str]:
@@ -326,20 +356,16 @@ class NoStoreMiddleware:
 
 
 class MisconfiguredMcpApp:
-    def __init__(self, message: str) -> None:
+    def __init__(self, app: ASGIApp, message: str) -> None:
+        self.app = app
         self.message = message
 
     async def __call__(
         self, scope: Scope, receive: Receive, send: Send
     ) -> None:
         if scope["type"] == "lifespan":
-            while True:
-                message = await receive()
-                if message["type"] == "lifespan.startup":
-                    await send({"type": "lifespan.startup.complete"})
-                elif message["type"] == "lifespan.shutdown":
-                    await send({"type": "lifespan.shutdown.complete"})
-                    return
+            await self.app(scope, receive, send)
+            return
         response = JSONResponse(
             {
                 "error": "mcp_auth_not_configured",
@@ -362,38 +388,23 @@ def build_mcp_http_app(
         allowed_origins=_allowed_origins(settings),
     )
 
+    oauth_error: McpOAuthConfigurationError | None = None
     try:
         oauth_values = _oauth_values(settings)
     except McpOAuthConfigurationError as exc:
-        return MisconfiguredMcpApp(str(exc))
+        oauth_values = None
+        oauth_error = exc
 
-    streamable_kwargs: dict[str, object] = {
-        "streamable_http_path": "/mcp/",
-        "stateless_http": True,
-        "json_response": True,
-        "transport_security": transport_security,
-    }
+    app: ASGIApp = server.streamable_http_app(
+        streamable_http_path="/mcp/",
+        stateless_http=True,
+        json_response=True,
+        transport_security=transport_security,
+    )
 
-    oauth_enabled = oauth_values is not None
-    if oauth_values is not None:
-        public_url, issuer_url, jwks_url = oauth_values
-        token_verifier = CompositeTokenVerifier(
-            issuer_url=issuer_url,
-            resource_url=public_url,
-            jwks_url=jwks_url,
-            static_token=settings.mcp_auth_token,
-        )
-        streamable_kwargs["auth"] = AuthSettings(
-            issuer_url=issuer_url,
-            resource_server_url=public_url,
-            required_scopes=[],
-            validate_token_resource=True,
-        )
-        streamable_kwargs["token_verifier"] = token_verifier
-
-    app: ASGIApp = server.streamable_http_app(**streamable_kwargs)  # type: ignore[arg-type]
-
-    if not oauth_enabled:
+    if oauth_error is not None:
+        app = MisconfiguredMcpApp(app, str(oauth_error))
+    elif oauth_values is None:
         app = McpBearerAuthMiddleware(app)
 
     app = NoStoreMiddleware(app)
