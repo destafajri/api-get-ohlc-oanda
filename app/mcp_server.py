@@ -277,9 +277,14 @@ def _oauth_values(settings: McpSettings) -> tuple[AnyHttpUrl, AnyHttpUrl, AnyHtt
     assert issuer_url is not None
     assert jwks_url is not None
 
-    if public_url.path.rstrip("/") != "/mcp":
+    if any(url.scheme != "https" for url in (public_url, issuer_url, jwks_url)):
         raise McpOAuthConfigurationError(
-            "MCP_PUBLIC_URL must point to the deployed /mcp/ endpoint."
+            "MCP OAuth URLs must use HTTPS."
+        )
+    if public_url.path.rstrip("/") != "/mcp" or public_url.query or public_url.fragment:
+        raise McpOAuthConfigurationError(
+            "MCP_PUBLIC_URL must be the canonical HTTPS /mcp/ endpoint "
+            "without query parameters or a fragment."
         )
     return public_url, issuer_url, jwks_url
 
