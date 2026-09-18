@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr, ValidationError
+from pydantic import AnyHttpUrl, Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,7 +37,16 @@ class McpSettings(BaseSettings):
 
     model_config = SETTINGS_CONFIG
 
+    # Legacy/static Bearer access for clients such as Codex and Claude Code.
     mcp_auth_token: SecretStr | None = None
+
+    # OAuth resource-server settings. When all three are configured, the MCP
+    # endpoint advertises RFC 9728 metadata and validates OAuth JWTs while still
+    # accepting MCP_AUTH_TOKEN when it is present.
+    mcp_public_url: AnyHttpUrl | None = None
+    mcp_oauth_issuer_url: AnyHttpUrl | None = None
+    mcp_oauth_jwks_url: AnyHttpUrl | None = None
+
     mcp_allowed_hosts: str = ""
     mcp_allowed_origins: str = ""
 
