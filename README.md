@@ -180,21 +180,38 @@ The same OANDA implementation is exposed to AI clients through a remote MCP
 server. The MCP layer calls the existing `OandaService`; it does not duplicate
 the OANDA request or normalization logic.
 
-### Endpoint and transport
+### Endpoint, transport, and authentication
 
 - endpoint: `https://<deployment-host>/mcp/`
 - local endpoint: `http://localhost:8000/mcp/`
 - transport: MCP Streamable HTTP
 - mode: stateless HTTP with JSON responses
-- authentication: `Authorization: Bearer <MCP_AUTH_TOKEN>`
 - tools: `get_ohlc`
+- OAuth discovery: `/.well-known/oauth-protected-resource/mcp/`
 - legacy HTTP+SSE transport is not exposed
 
-The trailing slash is intentional because the MCP ASGI application is mounted
-under `/mcp`. Use `/mcp/` in client configuration to avoid an HTTP redirect.
+The trailing slash on `/mcp/` is intentional and is part of the OAuth resource
+identifier.
 
-The endpoint fails closed with HTTP `503` when `MCP_AUTH_TOKEN` is not
-configured. A wrong or missing Bearer token returns HTTP `401`.
+Two authentication modes are supported:
+
+1. **OAuth 2.1 resource-server mode** for hosted clients such as ChatGPT. The
+   MCP server publishes Protected Resource Metadata and validates RS256 JWT
+   access tokens against the configured issuer, JWKS, exact resource audience,
+   expiry, and the required `openid` scope.
+2. **Static Bearer compatibility mode** for clients such as Codex and Claude
+   Code. When `MCP_AUTH_TOKEN` is configured, that token remains accepted even
+   while OAuth mode is enabled.
+
+The MCP server does not issue OAuth tokens or store OAuth sessions. Token
+issuance, user login, PKCE, client registration/CIMD, refresh tokens, and
+consent are delegated to a standards-compatible OAuth authorization server.
+This keeps the Vercel deployment stateless.
+
+If any OAuth variable is configured, all OAuth variables must be configured
+together. Partial OAuth configuration fails closed with HTTP `503`. With
+OAuth disabled, `MCP_AUTH_TOKEN` is required and missing/empty configuration
+also fails closed.
 
 ### MCP environment variables
 
@@ -204,20 +221,29 @@ OANDA_TOKEN=your-oanda-token
 OANDA_ENVIRONMENT=practice
 OANDA_TIMEOUT_SECONDS=10
 
-# Required for remote MCP access
+# Optional static Bearer access. Required when OAuth is disabled.
 MCP_AUTH_TOKEN=replace-with-a-long-random-token
+
+# OAuth resource-server mode: configure all three together.
+MCP_PUBLIC_URL=https://<deployment-host>/mcp/
+MCP_OAUTH_ISSUER_URL=https://<your-oauth-issuer>
+MCP_OAUTH_JWKS_URL=https://<your-oauth-issuer>/oauth2/jwks
 
 # Optional comma-separated overrides
 MCP_ALLOWED_HOSTS=
 MCP_ALLOWED_ORIGINS=
 ```
 
+`MCP_PUBLIC_URL` must exactly match the public MCP endpoint, including the
+`/mcp/` path. Configure that exact value as the OAuth authorization server's
+Resource Indicator/audience.
+
 `MCP_ALLOWED_HOSTS` contains hostnames without a scheme, for example
 `ohlc.example.com`. `MCP_ALLOWED_ORIGINS` contains full origins, for example
-`https://app.example.com`. They are only needed when the deployment hostname
-or browser origin is not already covered by the local/Vercel defaults.
+`https://app.example.com`. Vercel deployment hostnames are discovered from
+the `VERCEL_*` runtime variables.
 
-Do not reuse the OANDA API token as `MCP_AUTH_TOKEN`.
+Never reuse the OANDA API token as `MCP_AUTH_TOKEN`.
 
 ### `get_ohlc` tool
 
@@ -248,11 +274,11 @@ credentials and the MCP access token are never included in tool results.
 
 ### Vercel deployment
 
-The MCP server uses the existing FastAPI application in `app/main.py`; no
-separate long-running process or persistent local state is required. No
-`vercel.json` is required for this repository.
+The MCP server runs inside the existing FastAPI application in `app/main.py`.
+It does not require a long-running process, sticky sessions, local persistent
+state, or a separate `vercel.json`.
 
-Configure the following Vercel environment variables before deploying:
+For static-Bearer-only access, configure:
 
 ```text
 OANDA_TOKEN
@@ -261,38 +287,78 @@ OANDA_TIMEOUT_SECONDS
 MCP_AUTH_TOKEN
 ```
 
-Vercel deployment hosts are accepted automatically when the corresponding
-`VERCEL_*` runtime variables are present. For a custom domain, add the domain
-explicitly, for example:
+For OAuth access, also configure:
+
+```text
+MCP_PUBLIC_URL=https://<deployment-host>/mcp/
+MCP_OAUTH_ISSUER_URL=https://<oauth-issuer>
+MCP_OAUTH_JWKS_URL=https://<oauth-issuer>/oauth2/jwks
+```
+
+A custom domain may also need:
 
 ```text
 MCP_ALLOWED_HOSTS=ohlc.example.com
 ```
 
-Add `MCP_ALLOWED_ORIGINS` only for browser clients that must make cross-origin
-requests directly to the MCP endpoint. Server-to-server MCP clients normally do
-not require CORS configuration.
+Add `MCP_ALLOWED_ORIGINS` only when a browser client must make direct
+cross-origin requests. Server-to-server MCP clients normally do not need CORS.
+
+After changing Vercel environment variables, deploy again so the new runtime
+receives them.
 
 ### Connect from ChatGPT
 
-Current ChatGPT Desktop builds support Streamable HTTP MCP servers and share
-their MCP configuration with Codex. The UI path is **Settings > MCP Servers >
-Add Server**; choose Streamable HTTP and use the deployed `/mcp/` URL.
+ChatGPT's OAuth connection requires a standards-compatible authorization
+server in addition to this MCP resource server. The implementation is provider
+agnostic. A practical example is WorkOS AuthKit because it provides MCP OAuth
+authorization-server metadata, PKCE, Client ID Metadata Document (CIMD),
+Dynamic Client Registration (DCR) compatibility, Resource Indicators, and a
+JWKS endpoint.
 
-For a Bearer token supplied from an environment variable, the shared
-`~/.codex/config.toml` form is:
+Example production setup with AuthKit:
 
-```toml
-[mcp_servers.oanda_ohlc]
-url = "https://<deployment-host>/mcp/"
-bearer_token_env_var = "OANDA_MCP_TOKEN"
-```
+1. Create/enable AuthKit in a WorkOS project.
+2. In **Connect > Configuration**, enable **Client ID Metadata Document
+   (CIMD)**. Enable DCR too only if you want compatibility with clients that
+   still use it.
+3. Add the exact MCP endpoint as a **Resource Indicator**:
+   `https://<deployment-host>/mcp/`. Setting it as the default Resource
+   Indicator improves compatibility with clients that omit the OAuth
+   `resource` parameter.
+4. Set these Vercel variables using your AuthKit domain:
 
-Then set `OANDA_MCP_TOKEN` in the environment that launches the client.
+   ```text
+   MCP_PUBLIC_URL=https://<deployment-host>/mcp/
+   MCP_OAUTH_ISSUER_URL=https://<project>.authkit.app
+   MCP_OAUTH_JWKS_URL=https://<project>.authkit.app/oauth2/jwks
+   ```
 
-ChatGPT Web does not read the local Codex configuration. Hosted ChatGPT MCP
-tools are distributed through the plugin system, which is a separate packaging
-and installation layer and is intentionally not added to this server repo.
+5. Redeploy the Vercel project.
+6. Verify discovery:
+
+   ```bash
+   curl https://<deployment-host>/.well-known/oauth-protected-resource/mcp/
+   ```
+
+   The response should identify the MCP resource and the configured OAuth
+   authorization server.
+
+7. In ChatGPT's **New Plugin** form use:
+
+   ```text
+   Name: OHLC
+   Server URL: https://<deployment-host>/mcp/
+   Authentication: OAuth
+   ```
+
+ChatGPT can then discover the authorization server, complete OAuth authorization
+with PKCE, receive an access token, and send it to `/mcp/` as a Bearer token.
+The MCP server verifies the token before advertising or executing
+`get_ohlc`.
+
+Do not switch the MCP endpoint to unauthenticated mode merely to make ChatGPT
+connect.
 
 ### Connect from OpenAI Codex
 
@@ -317,9 +383,7 @@ Use `/mcp` or `codex mcp list` to inspect the connection.
 
 ### Connect from Claude
 
-The Claude API MCP connector can call a public Streamable HTTP endpoint and send
-an authorization token. Configure the server entry with the deployed URL and
-the same value as `MCP_AUTH_TOKEN`:
+The Claude API MCP connector can use the static Bearer token path directly:
 
 ```python
 mcp_servers=[
@@ -332,13 +396,10 @@ mcp_servers=[
 ]
 ```
 
-Claude web/Claude Desktop custom connectors can connect directly to remote MCP
-servers, but their managed connector authentication flow is OAuth-oriented.
-This repository intentionally implements a simpler static Bearer token instead
-of an OAuth authorization server. If the Claude connector UI in your client
-does not provide a way to send that static token, use Claude Code, the Claude
-API MCP connector, or place a standards-compliant OAuth gateway in front of
-`/mcp/`. Do not make the MCP endpoint public just to bypass authentication.
+Hosted Claude clients that use OAuth can use the same standards-based OAuth
+resource-server mode described above, provided the client and selected
+authorization server support the required MCP OAuth discovery/registration
+flow.
 
 ### Connect from Claude Code
 
@@ -450,8 +511,10 @@ pytest
 
 The test suite covers the existing REST API plus MCP tool discovery, structured
 tool results, validation errors, safe upstream error mapping, Streamable HTTP
-initialization, FastAPI mounting, stateless behavior, Bearer authentication,
-fail-closed configuration, and Origin rejection.
+initialization, FastAPI mounting, stateless behavior, static Bearer
+authentication, OAuth Protected Resource Metadata, OAuth challenges, mocked
+JWKS/JWT verification, audience rejection, partial-OAuth fail-closed behavior,
+and Origin rejection.
 
 OANDA calls are mocked in automated tests, so the suite does not require or use
 live OANDA credentials.
@@ -459,7 +522,7 @@ live OANDA credentials.
 ## Security notes
 
 - Never commit `.env`; it is ignored by Git.
-- Use a secret manager in production and inject `OANDA_TOKEN` and `MCP_AUTH_TOKEN` at runtime. Configure `OANDA_ENVIRONMENT` and `OANDA_TIMEOUT_SECONDS` as ordinary environment settings.
+- Use Vercel's secret/environment management for `OANDA_TOKEN`, `MCP_AUTH_TOKEN`, and OAuth configuration. Never put OANDA or OAuth secrets in client configuration.
 - The remote MCP endpoint is protected independently from the OANDA token and is never cacheable (`Cache-Control: no-store`).
 - Put this API behind authentication or a private network before exposing it publicly. The OANDA token stays server-side, but an unprotected endpoint could still be abused to consume quota.
 - Use HTTPS at the ingress or reverse proxy.
