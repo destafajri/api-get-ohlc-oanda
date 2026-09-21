@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from hmac import compare_digest
 from html import escape
 from pathlib import Path
 from typing import Annotated, AsyncIterator
@@ -60,7 +61,11 @@ async def add_request_id(request: Request, call_next):  # type: ignore[no-untype
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
 
-    if response.status_code == 200 and request.url.path == "/ohlc":
+    if request.url.path == "/research/oanda-context":
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["CDN-Cache-Control"] = "no-store"
+        response.headers["Vercel-CDN-Cache-Control"] = "no-store"
+    elif response.status_code == 200 and request.url.path == "/ohlc":
         response.headers["Cache-Control"] = OHLC_BROWSER_CACHE
         response.headers["CDN-Cache-Control"] = OHLC_CDN_CACHE
         response.headers["Vercel-CDN-Cache-Control"] = OHLC_CDN_CACHE
@@ -228,7 +233,9 @@ async def get_research_context(
         )
         return JSONResponse(status_code=503, content=body.model_dump())
 
-    if x_research_token != configured.get_secret_value():
+    if x_research_token is None or not compare_digest(
+        x_research_token, configured.get_secret_value()
+    ):
         body = ErrorResponse(
             error=ErrorDetail(
                 code="research_context_unauthorized",
