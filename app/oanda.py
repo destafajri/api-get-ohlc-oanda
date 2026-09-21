@@ -4,7 +4,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings
-from app.models import Candle, OhlcQuery, OhlcResponse
+from app.models import Candle, OhlcQuery, OhlcResponse, ResearchContextResponse
 
 
 class OandaServiceError(Exception):
@@ -87,6 +87,57 @@ class OandaService:
             granularity=query.granularity,
             count=len(candles),
             candles=candles,
+        )
+
+    async def get_research_context(self) -> ResearchContextResponse:
+        headers = {
+            "Authorization": f"Bearer {self.settings.oanda_token.get_secret_value()}",
+            "Accept-Datetime-Format": "RFC3339",
+        }
+        try:
+            response = await self.client.get(
+                f"{self.settings.oanda_base_url}/users/@",
+                headers=headers,
+                timeout=self.settings.oanda_timeout_seconds,
+            )
+        except httpx.TimeoutException as exc:
+            raise OandaServiceError(
+                504, "oanda_timeout", "OANDA did not respond before the timeout."
+            ) from exc
+        except httpx.RequestError as exc:
+            raise OandaServiceError(
+                503, "oanda_unavailable", "OANDA is currently unavailable."
+            ) from exc
+
+        if response.is_error:
+            if response.status_code in (401, 403):
+                raise OandaServiceError(
+                    502, "oanda_authentication_failed", "OANDA authentication failed."
+                )
+            if response.status_code == 429:
+                raise OandaServiceError(
+                    503, "oanda_rate_limited", "OANDA rate limit reached. Try again later."
+                )
+            raise OandaServiceError(
+                502, "oanda_context_error", "OANDA context lookup failed."
+            )
+
+        try:
+            payload = response.json()
+            country = payload["userInfo"]["country"]
+            if not isinstance(country, str) or not country:
+                raise TypeError
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OandaServiceError(
+                502,
+                "invalid_oanda_response",
+                "OANDA returned an unexpected response.",
+            ) from exc
+
+        return ResearchContextResponse(
+            environment=self.settings.oanda_environment,
+            upstream=self.settings.oanda_host,
+            country=country,
         )
 
     @staticmethod
