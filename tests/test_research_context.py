@@ -48,7 +48,7 @@ def test_research_context_returns_only_redacted_user_context(
 
     response = client.get(
         "/research/oanda-context",
-        headers={"Authorization": "Bearer research-secret"},
+        headers={"X-Research-Token": "research-secret"},
     )
 
     assert response.status_code == 200
