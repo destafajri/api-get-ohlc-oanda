@@ -150,10 +150,15 @@ class HealthResponse(BaseModel):
     status: str = "ok"
 
 
+class ResearchAccountContext(BaseModel):
+    site_id: str
+    division_id: str
+
+
 class ResearchContextResponse(BaseModel):
     environment: str
     upstream: str
-    country: str
+    accounts: list[ResearchAccountContext]
 
 
 class ErrorDetail(BaseModel):
