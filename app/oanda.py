@@ -30,6 +30,13 @@ class OandaService:
             "granularity": query.granularity.value,
             "price": "M",
         }
+        if query.daily_alignment is not None:
+            params["dailyAlignment"] = str(query.daily_alignment)
+        if query.alignment_timezone is not None:
+            params["alignmentTimezone"] = query.alignment_timezone
+        if query.smooth is not None:
+            params["smooth"] = "true" if query.smooth else "false"
+
         if query.count is not None:
             params["count"] = str(query.count)
         else:
