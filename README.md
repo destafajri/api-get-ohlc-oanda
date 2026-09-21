@@ -179,7 +179,7 @@ Only midpoint (`M`) candles are requested. Incomplete candles are retained and m
 ## Research provenance context
 
 For research tasks that need to identify the OANDA regulatory context without
-exposing account identifiers or profile details, configure a dedicated
+exposing full account identifiers or account details, configure a dedicated
 `RESEARCH_CONTEXT_TOKEN` and call:
 
 ```bash
@@ -187,19 +187,26 @@ curl -sS 'https://<deployment-host>/research/oanda-context' \
   -H 'X-Research-Token: <your-research-context-token>'
 ```
 
-The endpoint calls the OANDA v20 Practice/Live user-context endpoint using the
-server-side OANDA token, then returns only:
+The endpoint calls OANDA v20 `GET /v3/accounts` using the server-side OANDA
+token. OANDA Account IDs encode `siteID` and `divisionID`; the service
+immediately reduces the upstream IDs to those two non-account-specific
+components and returns unique contexts only:
 
 ```json
 {
   "environment": "practice",
   "upstream": "api-fxpractice.oanda.com",
-  "country": "SG"
+  "accounts": [
+    {
+      "site_id": "001",
+      "division_id": "011"
+    }
+  ]
 }
 ```
 
-It does **not** return the OANDA API token, username, user ID, email address,
-account IDs, balances, positions, orders, or transaction data. The route
+It does **not** return the OANDA API token, full Account IDs, user IDs,
+account numbers, balances, positions, orders, or transaction data. The route
 returns `503` when `RESEARCH_CONTEXT_TOKEN` is not configured and `401`
 when the supplied research token does not match.
 
