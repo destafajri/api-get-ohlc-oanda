@@ -47,6 +47,27 @@ class OhlcQuery(BaseModel):
         examples=["XAU_USD"],
     )
     granularity: Granularity = Field(examples=["H4"])
+    daily_alignment: int | None = Field(
+        default=None,
+        alias="dailyAlignment",
+        ge=0,
+        le=23,
+        description="OANDA daily candle alignment hour.",
+        examples=[17],
+    )
+    alignment_timezone: str | None = Field(
+        default=None,
+        alias="alignmentTimezone",
+        min_length=1,
+        max_length=100,
+        description="OANDA candle alignment timezone.",
+        examples=["America/New_York"],
+    )
+    smooth: bool | None = Field(
+        default=None,
+        description="Whether OANDA should smooth candle opens.",
+        examples=[False],
+    )
     output_format: OutputFormat = Field(
         default=OutputFormat.JSON,
         alias="format",
