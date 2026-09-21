@@ -59,6 +59,7 @@ def test_research_context_returns_only_redacted_user_context(
     }
     assert user.called
     assert user.calls.last.request.headers["Authorization"] == "Bearer test-token"
+    assert response.headers["Cache-Control"] == "no-store"
     assert "private-user" not in response.text
     assert "private@example.com" not in response.text
     assert "12345678" not in response.text
