@@ -10,6 +10,7 @@ A production-minimal FastAPI service that fetches midpoint candlesticks from OAN
 - optional CSV output for AI tools, spreadsheets, and data pipelines
 - safe upstream error mapping without leaking credentials or raw auth details
 - `GET /health` liveness endpoint
+- protected `GET /research/oanda-context` for redacted OANDA research provenance
 - crawler-readable home page, `robots.txt`, and sitemap for URL discovery
 - PNG and ICO favicon assets served with long-lived browser/CDN caching
 - lightweight `HEAD` checks for `/`, `/health`, and `/ohlc`
@@ -39,6 +40,7 @@ Edit `.env` with your own credentials:
 OANDA_TOKEN=your-token
 OANDA_ENVIRONMENT=practice
 OANDA_TIMEOUT_SECONDS=10
+RESEARCH_CONTEXT_TOKEN=replace-with-a-long-random-token
 MCP_AUTH_TOKEN=replace-with-a-long-random-token
 ```
 
@@ -173,6 +175,33 @@ Invalid requests are rejected locally with HTTP `422` before any request is sent
 - unknown query parameters are rejected to catch typos.
 
 Only midpoint (`M`) candles are requested. Incomplete candles are retained and marked with `complete: false`, allowing callers to decide whether to use them.
+
+## Research provenance context
+
+For research tasks that need to identify the OANDA regulatory context without
+exposing account identifiers or profile details, configure a dedicated
+`RESEARCH_CONTEXT_TOKEN` and call:
+
+```bash
+curl -sS 'https://<deployment-host>/research/oanda-context' \
+  -H 'X-Research-Token: <your-research-context-token>'
+```
+
+The endpoint calls the OANDA v20 Practice/Live user-context endpoint using the
+server-side OANDA token, then returns only:
+
+```json
+{
+  "environment": "practice",
+  "upstream": "api-fxpractice.oanda.com",
+  "country": "SG"
+}
+```
+
+It does **not** return the OANDA API token, username, user ID, email address,
+account IDs, balances, positions, orders, or transaction data. The route
+returns `503` when `RESEARCH_CONTEXT_TOKEN` is not configured and `401`
+when the supplied research token does not match.
 
 ## Remote MCP server
 

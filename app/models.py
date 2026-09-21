@@ -150,6 +150,12 @@ class HealthResponse(BaseModel):
     status: str = "ok"
 
 
+class ResearchContextResponse(BaseModel):
+    environment: str
+    upstream: str
+    country: str
+
+
 class ErrorDetail(BaseModel):
     code: str
     message: str

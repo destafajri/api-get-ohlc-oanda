@@ -21,15 +21,19 @@ class Settings(BaseSettings):
     oanda_token: Annotated[SecretStr, Field(min_length=1)]
     oanda_environment: Literal["practice", "live"] = "practice"
     oanda_timeout_seconds: Annotated[float, Field(gt=0, le=60)] = 10.0
+    research_context_token: SecretStr | None = None
 
     @property
-    def oanda_base_url(self) -> str:
-        host = (
+    def oanda_host(self) -> str:
+        return (
             "api-fxpractice.oanda.com"
             if self.oanda_environment == "practice"
             else "api-fxtrade.oanda.com"
         )
-        return f"https://{host}/v3"
+
+    @property
+    def oanda_base_url(self) -> str:
+        return f"https://{self.oanda_host}/v3"
 
 
 class McpSettings(BaseSettings):

@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
+from hmac import compare_digest
 from html import escape
 from pathlib import Path
 from typing import Annotated, AsyncIterator
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Query, Request, Response
+from fastapi import Depends, FastAPI, Header, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
 from app.config import ConfigurationError, Settings, get_mcp_settings, get_settings
@@ -17,6 +18,7 @@ from app.models import (
     OhlcQuery,
     OhlcResponse,
     OutputFormat,
+    ResearchContextResponse,
 )
 from app.oanda import OandaService, OandaServiceError
 from app.serializers import ohlc_to_csv
@@ -59,7 +61,11 @@ async def add_request_id(request: Request, call_next):  # type: ignore[no-untype
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
 
-    if response.status_code == 200 and request.url.path == "/ohlc":
+    if request.url.path == "/research/oanda-context":
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["CDN-Cache-Control"] = "no-store"
+        response.headers["Vercel-CDN-Cache-Control"] = "no-store"
+    elif response.status_code == 200 and request.url.path == "/ohlc":
         response.headers["Cache-Control"] = OHLC_BROWSER_CACHE
         response.headers["CDN-Cache-Control"] = OHLC_CDN_CACHE
         response.headers["Vercel-CDN-Cache-Control"] = OHLC_CDN_CACHE
@@ -203,6 +209,43 @@ async def health() -> HealthResponse:
 @app.head("/health", include_in_schema=False)
 async def head_health() -> Response:
     return Response(status_code=200, media_type="application/json")
+
+
+@app.get(
+    "/research/oanda-context",
+    response_model=ResearchContextResponse,
+    responses={401: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+    tags=["research"],
+)
+async def get_research_context(
+    request: Request,
+    x_research_token: Annotated[str | None, Header()] = None,
+    settings: Settings = Depends(get_settings),
+) -> ResearchContextResponse | Response:
+    """Return minimal OANDA context for research provenance."""
+    configured = settings.research_context_token
+    if configured is None:
+        body = ErrorResponse(
+            error=ErrorDetail(
+                code="research_context_not_configured",
+                message="Research context access is not configured.",
+            )
+        )
+        return JSONResponse(status_code=503, content=body.model_dump())
+
+    if x_research_token is None or not compare_digest(
+        x_research_token, configured.get_secret_value()
+    ):
+        body = ErrorResponse(
+            error=ErrorDetail(
+                code="research_context_unauthorized",
+                message="Valid research context authorization is required.",
+            )
+        )
+        return JSONResponse(status_code=401, content=body.model_dump())
+
+    service = OandaService(request.app.state.http_client, settings)
+    return await service.get_research_context()
 
 
 @app.head("/ohlc", include_in_schema=False)
