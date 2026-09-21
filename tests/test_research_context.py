@@ -49,20 +49,6 @@ def test_research_context_returns_only_redacted_account_context(
             },
         )
     )
-    user = respx.get("https://api-fxpractice.oanda.com/v3/users/@").mock(
-        return_value=Response(
-            200,
-            json={
-                "userInfo": {
-                    "username": "private-user",
-                    "userID": 12345678,
-                    "country": "SG",
-                    "emailAddress": "private@example.com",
-                }
-            },
-        )
-    )
-
     response = client.get(
         "/research/oanda-context",
         headers={"Authorization": "Bearer research-secret"},
@@ -72,13 +58,10 @@ def test_research_context_returns_only_redacted_account_context(
     assert response.json() == {
         "environment": "practice",
         "upstream": "api-fxpractice.oanda.com",
-        "country": "SG",
         "accounts": [{"site_id": "001", "division_id": "011"}],
     }
     assert accounts.called
-    assert user.called
     assert accounts.calls.last.request.headers["Authorization"] == "Bearer test-token"
-    assert user.calls.last.request.headers["Authorization"] == "Bearer test-token"
 
     serialized = response.text
     assert "12345678" not in serialized
@@ -95,10 +78,6 @@ def test_research_context_rejects_malformed_upstream_account_id(
     respx.get("https://api-fxpractice.oanda.com/v3/accounts").mock(
         return_value=Response(200, json={"accounts": [{"id": "malformed"}]})
     )
-    respx.get("https://api-fxpractice.oanda.com/v3/users/@").mock(
-        return_value=Response(200, json={"userInfo": {"country": "SG"}})
-    )
-
     response = client.get(
         "/research/oanda-context",
         headers={"Authorization": "Bearer research-secret"},
