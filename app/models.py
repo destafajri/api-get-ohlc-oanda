@@ -158,7 +158,6 @@ class ResearchAccountContext(BaseModel):
 class ResearchContextResponse(BaseModel):
     environment: str
     upstream: str
-    country: str
     accounts: list[ResearchAccountContext]
 
 
