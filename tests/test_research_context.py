@@ -15,7 +15,7 @@ def _research_settings() -> Settings:
 
 
 @respx.mock
-def test_research_context_requires_dedicated_bearer_token(
+def test_research_context_requires_dedicated_token(
     client: TestClient,
 ) -> None:
     app.dependency_overrides[get_settings] = _research_settings
@@ -75,7 +75,7 @@ def test_research_context_rejects_missing_country(
 
     response = client.get(
         "/research/oanda-context",
-        headers={"Authorization": "Bearer research-secret"},
+        headers={"X-Research-Token": "research-secret"},
     )
 
     assert response.status_code == 502
