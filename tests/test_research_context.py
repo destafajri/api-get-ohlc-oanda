@@ -28,27 +28,24 @@ def test_research_context_requires_dedicated_bearer_token(
 
 
 @respx.mock
-def test_research_context_returns_only_redacted_account_context(
+def test_research_context_returns_only_redacted_user_context(
     client: TestClient,
 ) -> None:
-    app.dependency_overrides[get_settings] = _research_settings
-    accounts = respx.get("https://api-fxpractice.oanda.com/v3/accounts").mock(
+    user = respx.get("https://api-fxpractice.oanda.com/v3/users/@").mock(
         return_value=Response(
             200,
             json={
-                "accounts": [
-                    {
-                        "id": "001-011-12345678-001",
-                        "mt4AccountID": 9999999,
-                        "tags": ["private"],
-                    },
-                    {
-                        "id": "001-011-12345678-002",
-                    },
-                ]
+                "userInfo": {
+                    "username": "private-user",
+                    "userID": 12345678,
+                    "country": "SG",
+                    "emailAddress": "private@example.com",
+                }
             },
         )
     )
+    app.dependency_overrides[get_settings] = _research_settings
+
     response = client.get(
         "/research/oanda-context",
         headers={"Authorization": "Bearer research-secret"},
@@ -58,26 +55,24 @@ def test_research_context_returns_only_redacted_account_context(
     assert response.json() == {
         "environment": "practice",
         "upstream": "api-fxpractice.oanda.com",
-        "accounts": [{"site_id": "001", "division_id": "011"}],
+        "country": "SG",
     }
-    assert accounts.called
-    assert accounts.calls.last.request.headers["Authorization"] == "Bearer test-token"
-
-    serialized = response.text
-    assert "12345678" not in serialized
-    assert "private-user" not in serialized
-    assert "private@example.com" not in serialized
-    assert "9999999" not in serialized
+    assert user.called
+    assert user.calls.last.request.headers["Authorization"] == "Bearer test-token"
+    assert "private-user" not in response.text
+    assert "private@example.com" not in response.text
+    assert "12345678" not in response.text
 
 
 @respx.mock
-def test_research_context_rejects_malformed_upstream_account_id(
+def test_research_context_rejects_missing_country(
     client: TestClient,
 ) -> None:
-    app.dependency_overrides[get_settings] = _research_settings
-    respx.get("https://api-fxpractice.oanda.com/v3/accounts").mock(
-        return_value=Response(200, json={"accounts": [{"id": "malformed"}]})
+    respx.get("https://api-fxpractice.oanda.com/v3/users/@").mock(
+        return_value=Response(200, json={"userInfo": {"userID": 12345678}})
     )
+    app.dependency_overrides[get_settings] = _research_settings
+
     response = client.get(
         "/research/oanda-context",
         headers={"Authorization": "Bearer research-secret"},
@@ -85,4 +80,4 @@ def test_research_context_rejects_malformed_upstream_account_id(
 
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "invalid_oanda_response"
-    assert "malformed" not in response.text
+    assert "12345678" not in response.text
