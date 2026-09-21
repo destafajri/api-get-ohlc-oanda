@@ -4,7 +4,13 @@ from typing import Any
 import httpx
 
 from app.config import Settings
-from app.models import Candle, OhlcQuery, OhlcResponse, ResearchContextResponse
+from app.models import (
+    Candle,
+    OhlcQuery,
+    OhlcResponse,
+    ResearchAccountContext,
+    ResearchContextResponse,
+)
 
 
 class OandaServiceError(Exception):
@@ -96,7 +102,7 @@ class OandaService:
         }
         try:
             response = await self.client.get(
-                f"{self.settings.oanda_base_url}/users/@",
+                f"{self.settings.oanda_base_url}/accounts",
                 headers=headers,
                 timeout=self.settings.oanda_timeout_seconds,
             )
@@ -124,9 +130,27 @@ class OandaService:
 
         try:
             payload = response.json()
-            country = payload["userInfo"]["country"]
-            if not isinstance(country, str) or not country:
+            raw_accounts = payload["accounts"]
+            if not isinstance(raw_accounts, list):
                 raise TypeError
+
+            contexts: dict[tuple[str, str], ResearchAccountContext] = {}
+            for account in raw_accounts:
+                if not isinstance(account, dict):
+                    raise TypeError
+                account_id = account["id"]
+                if not isinstance(account_id, str):
+                    raise TypeError
+
+                parts = account_id.split("-")
+                if len(parts) != 4 or not all(part.isdigit() for part in parts):
+                    raise ValueError
+
+                site_id, division_id = parts[0], parts[1]
+                contexts[(site_id, division_id)] = ResearchAccountContext(
+                    site_id=site_id,
+                    division_id=division_id,
+                )
         except (KeyError, TypeError, ValueError) as exc:
             raise OandaServiceError(
                 502,
@@ -137,7 +161,7 @@ class OandaService:
         return ResearchContextResponse(
             environment=self.settings.oanda_environment,
             upstream=self.settings.oanda_host,
-            country=country,
+            accounts=[contexts[key] for key in sorted(contexts)],
         )
 
     @staticmethod
