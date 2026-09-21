@@ -66,7 +66,7 @@ def test_research_context_rejects_malformed_account_id(
     client: TestClient,
 ) -> None:
     respx.get("https://api-fxpractice.oanda.com/v3/accounts").mock(
-        return_value=Response(200, json={"accounts": [{"id": "invalid"}]})
+        return_value=Response(200, json={"accounts": [{"id": "leaky-account-value"}]})
     )
     app.dependency_overrides[get_settings] = _research_settings
 
@@ -77,4 +77,4 @@ def test_research_context_rejects_malformed_account_id(
 
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "invalid_oanda_response"
-    assert "invalid" not in response.text
+    assert "leaky-account-value" not in response.text
