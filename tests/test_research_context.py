@@ -28,19 +28,17 @@ def test_research_context_requires_dedicated_token(
 
 
 @respx.mock
-def test_research_context_returns_only_redacted_user_context(
+def test_research_context_returns_only_redacted_division_context(
     client: TestClient,
 ) -> None:
-    user = respx.get("https://api-fxpractice.oanda.com/v3/users/@").mock(
+    accounts = respx.get("https://api-fxpractice.oanda.com/v3/accounts").mock(
         return_value=Response(
             200,
             json={
-                "userInfo": {
-                    "username": "private-user",
-                    "userID": 12345678,
-                    "country": "SG",
-                    "emailAddress": "private@example.com",
-                }
+                "accounts": [
+                    {"id": "001-011-00000000-001", "tags": []},
+                    {"id": "001-011-00000000-002", "tags": []},
+                ]
             },
         )
     )
@@ -55,22 +53,20 @@ def test_research_context_returns_only_redacted_user_context(
     assert response.json() == {
         "environment": "practice",
         "upstream": "api-fxpractice.oanda.com",
-        "country": "SG",
+        "accounts": [{"site_id": "001", "division_id": "011"}],
     }
-    assert user.called
-    assert user.calls.last.request.headers["Authorization"] == "Bearer test-token"
+    assert accounts.called
+    assert accounts.calls.last.request.headers["Authorization"] == "Bearer test-token"
     assert response.headers["Cache-Control"] == "no-store"
-    assert "private-user" not in response.text
-    assert "private@example.com" not in response.text
-    assert "12345678" not in response.text
+    assert "00000000" not in response.text
 
 
 @respx.mock
-def test_research_context_rejects_missing_country(
+def test_research_context_rejects_malformed_account_id(
     client: TestClient,
 ) -> None:
-    respx.get("https://api-fxpractice.oanda.com/v3/users/@").mock(
-        return_value=Response(200, json={"userInfo": {"userID": 12345678}})
+    respx.get("https://api-fxpractice.oanda.com/v3/accounts").mock(
+        return_value=Response(200, json={"accounts": [{"id": "invalid"}]})
     )
     app.dependency_overrides[get_settings] = _research_settings
 
@@ -81,4 +77,4 @@ def test_research_context_rejects_missing_country(
 
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "invalid_oanda_response"
-    assert "12345678" not in response.text
+    assert "invalid" not in response.text
