@@ -75,6 +75,16 @@ def test_history_chunk_delay_can_be_configured() -> None:
     assert settings.historical_chunk_delay_seconds == 10.0
 
 
+def test_history_page_size_defaults_to_2500() -> None:
+    settings = Settings(oanda_token="test-token")
+    assert settings.historical_page_size == 2500
+
+
+def test_history_page_size_can_be_configured() -> None:
+    settings = Settings(oanda_token="test-token", historical_page_size=1000)
+    assert settings.historical_page_size == 1000
+
+
 @respx.mock
 def test_history_defaults_to_2005_and_now(history_client: TestClient) -> None:
     route = respx.get(
@@ -101,7 +111,7 @@ def test_history_defaults_to_2005_and_now(history_client: TestClient) -> None:
     assert payload["count"] == 0
     params = route.calls.last.request.url.params
     assert params["from"] == "2005-01-01T00:00:00Z"
-    assert params["count"] == "5000"
+    assert params["count"] == "2500"
     assert params["includeFirst"] == "true"
 
 
@@ -110,14 +120,14 @@ def test_history_continues_after_4999_include_first_page(
     history_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     start = datetime(2020, 1, 1, tzinfo=timezone.utc)
-    first = [_candle(start + timedelta(hours=4 * index)) for index in range(5000)]
-    first_last = start + timedelta(hours=4 * 4999)
+    first = [_candle(start + timedelta(hours=4 * index)) for index in range(2500)]
+    first_last = start + timedelta(hours=4 * 2499)
 
     second = [
         _candle(first_last + timedelta(hours=4 * (index + 1)))
-        for index in range(4999)
+        for index in range(2499)
     ]
-    second_last = first_last + timedelta(hours=4 * 4999)
+    second_last = first_last + timedelta(hours=4 * 2499)
     third_time = second_last + timedelta(hours=4)
 
     responses = [
@@ -160,21 +170,95 @@ def test_history_continues_after_4999_include_first_page(
     )
 
     assert response.status_code == 200
-    assert response.json()["count"] == 10000
+    assert response.json()["count"] == 5000
     assert route.call_count == 3
 
     second_params = route.calls[1].request.url.params
     assert second_params["from"] == first_last.isoformat().replace("+00:00", "Z")
-    assert second_params["count"] == "5000"
+    assert second_params["count"] == "2500"
     assert second_params["includeFirst"] == "false"
 
     third_params = route.calls[2].request.url.params
     assert third_params["from"] == second_last.isoformat().replace("+00:00", "Z")
-    assert third_params["count"] == "5000"
+    assert third_params["count"] == "2500"
     assert third_params["includeFirst"] == "false"
 
     assert sleep.await_count == 2
     sleep.assert_awaited_with(5.0)
+
+
+@respx.mock
+def test_history_retries_transient_oanda_gateway_timeout(
+    history_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    responses = [
+        Response(504, text="Gateway Timeout"),
+        Response(
+            200,
+            json={
+                "instrument": "XAU_USD",
+                "granularity": "H4",
+                "candles": [_candle(at)],
+            },
+        ),
+    ]
+
+    def handler(_request):  # type: ignore[no-untyped-def]
+        return responses.pop(0)
+
+    route = respx.get(
+        "https://api-fxpractice.oanda.com/v3/instruments/XAU_USD/candles"
+    ).mock(side_effect=handler)
+    sleep = AsyncMock()
+    monkeypatch.setattr("app.oanda.asyncio.sleep", sleep)
+
+    response = history_client.get(
+        "/ohlc/history",
+        params={
+            "instrument": "XAU_USD",
+            "granularity": "H4",
+            "from": at.isoformat(),
+            "until": (at + timedelta(hours=8)).isoformat(),
+            "key": "history-key",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+    assert route.call_count == 2
+    sleep.assert_awaited_once_with(5.0)
+
+
+@respx.mock
+def test_history_preserves_oanda_422_error_message(
+    history_client: TestClient,
+) -> None:
+    respx.get(
+        "https://api-fxpractice.oanda.com/v3/instruments/XAU_USD/candles"
+    ).mock(
+        return_value=Response(
+            422,
+            json={"errorMessage": "Invalid value specified for 'from'"},
+        )
+    )
+
+    response = history_client.get(
+        "/ohlc/history",
+        params={
+            "instrument": "XAU_USD",
+            "granularity": "H4",
+            "from": "2005-01-01T00:00:00Z",
+            "until": "2006-01-01T00:00:00Z",
+            "key": "history-key",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == {
+        "code": "invalid_oanda_request",
+        "message": "Invalid value specified for 'from'",
+    }
 
 
 @respx.mock
