@@ -166,6 +166,7 @@ class OandaService:
     ) -> AsyncIterator[Candle]:
         """Yield history while paging 5,000 candles at a time with a 1s delay."""
         chunk = first_chunk
+        full_page_size = 5000
 
         while chunk:
             reached_until = False
@@ -176,7 +177,7 @@ class OandaService:
                 if candle.time >= query.from_time:
                     yield candle
 
-            if reached_until or len(chunk) < 5000:
+            if reached_until or len(chunk) < full_page_size:
                 return
 
             last_time = chunk[-1].time
@@ -195,7 +196,12 @@ class OandaService:
                     "invalid_oanda_response",
                     "OANDA pagination did not advance.",
                 )
+
+            # OANDA applies includeFirst=false to the candle covered by from.
+            # With count=5000, a full continuation page can therefore contain
+            # 4,999 returned candles. Treat 4,999 as full rather than EOF.
             chunk = next_chunk
+            full_page_size = 4999
 
     async def get_research_context(self) -> ResearchContextResponse:
         headers = {
