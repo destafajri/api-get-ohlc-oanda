@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     oanda_environment: Literal["practice", "live"] = "practice"
     oanda_timeout_seconds: Annotated[float, Field(gt=0, le=60)] = 10.0
     research_context_token: SecretStr | None = None
+    historical_api_key: SecretStr | None = None
 
     @property
     def oanda_host(self) -> str:

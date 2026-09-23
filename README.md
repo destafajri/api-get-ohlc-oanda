@@ -5,6 +5,7 @@ A production-minimal FastAPI service that fetches midpoint candlesticks from OAN
 ## Features
 
 - `GET /ohlc` with validated recent-count and historical time-range modes
+- protected `GET /ohlc/history` for paginated H4/M15/M5 full-history exports
 - async upstream calls with connection pooling and timeouts
 - normalized OHLC response; decimal prices remain strings to preserve precision
 - optional CSV output for AI tools, spreadsheets, and data pipelines
@@ -40,6 +41,7 @@ Edit `.env` with your own credentials:
 OANDA_TOKEN=your-token
 OANDA_ENVIRONMENT=practice
 OANDA_TIMEOUT_SECONDS=10
+HISTORICAL_API_KEY=replace-with-a-long-random-token
 RESEARCH_CONTEXT_TOKEN=replace-with-a-long-random-token
 MCP_AUTH_TOKEN=replace-with-a-long-random-token
 ```
@@ -175,6 +177,54 @@ Invalid requests are rejected locally with HTTP `422` before any request is sent
 - unknown query parameters are rejected to catch typos.
 
 Only midpoint (`M`) candles are requested. Incomplete candles are retained and marked with `complete: false`, allowing callers to decide whether to use them.
+
+## Usage: full historical export
+
+Use `GET /ohlc/history` for large H4, M15, or M5 downloads. This route is
+protected by a dedicated `HISTORICAL_API_KEY`; send it as the `key` query
+parameter. It never accepts or exposes the OANDA token as client authentication.
+
+If `from` is omitted, the export starts at `2005-01-01T00:00:00Z`. If
+`until` is omitted, it uses the current request time. `until` is exclusive.
+
+```bash
+curl --get 'http://localhost:8000/ohlc/history' \
+  --data-urlencode 'key=replace-with-a-long-random-token' \
+  --data-urlencode 'instrument=XAU_USD' \
+  --data-urlencode 'granularity=M15' \
+  --data-urlencode 'from=2005-01-01T00:00:00Z' \
+  --data-urlencode 'until=2026-09-23T08:51:40Z' \
+  --data-urlencode 'format=csv' \
+  --output XAU_USD-M15-history.csv
+```
+
+Supported historical parameters:
+
+| Parameter | Rules | Default |
+| --- | --- | --- |
+| `key` | historical API key matching `HISTORICAL_API_KEY` | required |
+| `instrument` | uppercase OANDA instrument such as `XAU_USD` | required |
+| `granularity` | `H4`, `M15`, or `M5` | required |
+| `from` | RFC3339 timestamp with timezone; inclusive | `2005-01-01T00:00:00Z` |
+| `until` | RFC3339 timestamp with timezone; exclusive | request-time now |
+| `format` | `json` or `csv` | `json` |
+
+The service asks OANDA for at most 5,000 candles per upstream request. After a
+full 5,000-candle page, it waits 1 second before requesting the next page.
+Subsequent pages use OANDA's `includeFirst=false` behavior so the boundary
+candle is not duplicated. OANDA documents a maximum of 5,000 candles per
+request.
+
+Both formats are streamed and returned with `Cache-Control: no-store`.
+CSV responses are downloads such as `XAU_USD-M15-history.csv`; JSON responses
+contain `instrument`, `granularity`, `from`, `until`, `candles`, and a
+final `count`.
+
+A complete M5 export from 2005 can take several minutes because the requested
+1-second pause applies between every 5,000-candle page. On serverless hosts,
+that may exceed the platform's request-duration or response-size limits; run
+the service in an environment that permits long-lived streaming requests when
+downloading the entire M5 history.
 
 ## Research provenance context
 

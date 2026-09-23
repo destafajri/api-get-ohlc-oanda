@@ -30,6 +30,12 @@ class Granularity(StrEnum):
     M = "M"
 
 
+class HistoricalGranularity(StrEnum):
+    M5 = "M5"
+    M15 = "M15"
+    H4 = "H4"
+
+
 class OutputFormat(StrEnum):
     JSON = "json"
     CSV = "csv"
@@ -119,6 +125,64 @@ class OhlcQuery(BaseModel):
         if self.to_time is not None and self.from_time >= self.to_time:
             raise ValueError("from must be earlier than to")
 
+        return self
+
+    @staticmethod
+    def _require_timezone(value: datetime, field_name: str) -> None:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError(
+                f"{field_name} must include a timezone, for example Z or +07:00"
+            )
+
+
+class HistoricalOhlcQuery(BaseModel):
+    """Validated query for paginated historical OHLC exports."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    instrument: str = Field(
+        min_length=3,
+        max_length=20,
+        pattern=r"^[A-Z0-9]+_[A-Z0-9]+$",
+        examples=["XAU_USD"],
+    )
+    granularity: HistoricalGranularity = Field(examples=["H4"])
+    output_format: OutputFormat = Field(
+        default=OutputFormat.JSON,
+        alias="format",
+        description="Response representation. JSON is the default.",
+        examples=["csv"],
+    )
+    key: str | None = Field(
+        default=None,
+        min_length=1,
+        description="API key for historical OHLC access.",
+    )
+    from_time: datetime = Field(
+        default=datetime(2005, 1, 1, tzinfo=timezone.utc),
+        alias="from",
+        description="Inclusive start. Defaults to 2005-01-01T00:00:00Z.",
+        examples=["2005-01-01T00:00:00Z"],
+    )
+    until_time: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        alias="until",
+        description="Exclusive end. Defaults to the current request time.",
+        examples=["2026-09-23T08:51:40Z"],
+    )
+
+    @model_validator(mode="after")
+    def validate_time_range(self) -> Self:
+        now = datetime.now(timezone.utc)
+        self._require_timezone(self.from_time, "from")
+        self._require_timezone(self.until_time, "until")
+
+        if self.from_time > now:
+            raise ValueError("from cannot be later than the current time")
+        if self.until_time > now:
+            raise ValueError("until cannot be later than the current time")
+        if self.from_time >= self.until_time:
+            raise ValueError("from must be earlier than until")
         return self
 
     @staticmethod

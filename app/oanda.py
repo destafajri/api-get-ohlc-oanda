@@ -1,3 +1,5 @@
+import asyncio
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
 
@@ -6,6 +8,7 @@ import httpx
 from app.config import Settings
 from app.models import (
     Candle,
+    HistoricalOhlcQuery,
     OhlcQuery,
     OhlcResponse,
     ResearchAccountContext,
@@ -94,6 +97,105 @@ class OandaService:
             count=len(candles),
             candles=candles,
         )
+
+    async def get_historical_chunk(
+        self,
+        query: HistoricalOhlcQuery,
+        from_time: datetime,
+        *,
+        include_first: bool,
+    ) -> list[Candle]:
+        """Fetch one OANDA history page capped at 5,000 candles."""
+        url = f"{self.settings.oanda_base_url}/instruments/{query.instrument}/candles"
+        headers = {
+            "Authorization": f"Bearer {self.settings.oanda_token.get_secret_value()}",
+            "Accept-Datetime-Format": "RFC3339",
+        }
+        params = {
+            "granularity": query.granularity.value,
+            "price": "M",
+            "count": "5000",
+            "from": self._format_rfc3339(from_time),
+            "includeFirst": "true" if include_first else "false",
+        }
+
+        try:
+            response = await self.client.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=self.settings.oanda_timeout_seconds,
+            )
+        except httpx.TimeoutException as exc:
+            raise OandaServiceError(
+                504, "oanda_timeout", "OANDA did not respond before the timeout."
+            ) from exc
+        except httpx.RequestError as exc:
+            raise OandaServiceError(
+                503, "oanda_unavailable", "OANDA is currently unavailable."
+            ) from exc
+
+        if response.is_error:
+            self._raise_for_error(response)
+
+        try:
+            payload: dict[str, Any] = response.json()
+            candles = [
+                Candle(
+                    time=item["time"],
+                    open=item["mid"]["o"],
+                    high=item["mid"]["h"],
+                    low=item["mid"]["l"],
+                    close=item["mid"]["c"],
+                    volume=item["volume"],
+                    complete=item["complete"],
+                )
+                for item in payload["candles"]
+            ]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OandaServiceError(
+                502, "invalid_oanda_response", "OANDA returned an unexpected response."
+            ) from exc
+
+        return candles
+
+    async def iter_historical_candles(
+        self,
+        query: HistoricalOhlcQuery,
+        first_chunk: list[Candle],
+    ) -> AsyncIterator[Candle]:
+        """Yield history while paging 5,000 candles at a time with a 1s delay."""
+        chunk = first_chunk
+
+        while chunk:
+            reached_until = False
+            for candle in chunk:
+                if candle.time >= query.until_time:
+                    reached_until = True
+                    break
+                if candle.time >= query.from_time:
+                    yield candle
+
+            if reached_until or len(chunk) < 5000:
+                return
+
+            last_time = chunk[-1].time
+            if last_time >= query.until_time:
+                return
+
+            await asyncio.sleep(1.0)
+            next_chunk = await self.get_historical_chunk(
+                query,
+                last_time,
+                include_first=False,
+            )
+            if next_chunk and next_chunk[-1].time <= last_time:
+                raise OandaServiceError(
+                    502,
+                    "invalid_oanda_response",
+                    "OANDA pagination did not advance.",
+                )
+            chunk = next_chunk
 
     async def get_research_context(self) -> ResearchContextResponse:
         headers = {
