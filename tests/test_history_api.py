@@ -116,7 +116,7 @@ def test_history_defaults_to_2005_and_now(history_client: TestClient) -> None:
 
 
 @respx.mock
-def test_history_continues_after_4999_include_first_page(
+def test_history_continues_after_full_include_first_false_page(
     history_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     start = datetime(2020, 1, 1, tzinfo=timezone.utc)
