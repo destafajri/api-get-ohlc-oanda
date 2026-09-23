@@ -18,7 +18,7 @@ CREATE TABLE candles (
     volume INTEGER NOT NULL,
     complete INTEGER NOT NULL CHECK (complete IN (0, 1)),
     PRIMARY KEY (instrument, timeframe, time)
-)
+) WITHOUT ROWID
 """
 
 
