@@ -80,6 +80,11 @@ class OhlcQuery(BaseModel):
         description="Response representation. JSON is the default.",
         examples=["csv"],
     )
+    key: str | None = Field(
+        default=None,
+        min_length=1,
+        description="API key for historical OHLC access.",
+    )
     count: int | None = Field(
         default=None,
         ge=1,
