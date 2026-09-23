@@ -62,6 +62,19 @@ def test_history_fails_closed_when_api_key_is_not_configured() -> None:
     assert response.json()["error"]["code"] == "historical_api_not_configured"
 
 
+def test_history_chunk_delay_defaults_to_five_seconds() -> None:
+    settings = Settings(oanda_token="test-token")
+    assert settings.historical_chunk_delay_seconds == 5.0
+
+
+def test_history_chunk_delay_can_be_configured() -> None:
+    settings = Settings(
+        oanda_token="test-token",
+        historical_chunk_delay_seconds=10,
+    )
+    assert settings.historical_chunk_delay_seconds == 10.0
+
+
 @respx.mock
 def test_history_defaults_to_2005_and_now(history_client: TestClient) -> None:
     route = respx.get(
@@ -161,7 +174,7 @@ def test_history_continues_after_4999_include_first_page(
     assert third_params["includeFirst"] == "false"
 
     assert sleep.await_count == 2
-    sleep.assert_awaited_with(10.0)
+    sleep.assert_awaited_with(5.0)
 
 
 @respx.mock
