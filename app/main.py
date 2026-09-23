@@ -315,10 +315,13 @@ async def get_ohlc(
     "/ohlc/history",
     responses={
         200: {
-            "description": "Paginated historical OHLC data as streamed JSON or CSV.",
+            "description": "Paginated historical OHLC data as JSON, CSV, or SQLite.",
             "content": {
                 "application/json": {"schema": {"type": "object"}},
                 "text/csv": {"schema": {"type": "string"}},
+                "application/vnd.sqlite3": {
+                    "schema": {"type": "string", "format": "binary"}
+                },
             },
         },
         400: {"model": ErrorResponse},
@@ -335,7 +338,7 @@ async def get_historical_ohlc(
     query: Annotated[HistoricalOhlcQuery, Query()],
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    """Stream H4/M15/M5 history in 5,000-candle OANDA chunks."""
+    """Export H4/M15/M5 history in JSON, CSV, or SQLite."""
     configured = settings.historical_api_key
     if configured is None:
         body = ErrorResponse(
