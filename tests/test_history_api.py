@@ -51,8 +51,7 @@ def test_history_fails_closed_when_api_key_is_not_configured() -> None:
         with TestClient(app) as test_client:
             response = test_client.get(
                 "/ohlc/history",
-                params={"instrument": "XAU_USD", "granularity": "H4"},
-                headers={"X-API-Key": "anything"},
+                params={"instrument": "XAU_USD", "granularity": "H4", "key": "anything"},
             )
     finally:
         app.dependency_overrides.clear()
@@ -75,8 +74,7 @@ def test_history_defaults_to_2005_and_now(history_client: TestClient) -> None:
 
     response = history_client.get(
         "/ohlc/history",
-        params={"instrument": "XAU_USD", "granularity": "H4"},
-        headers={"X-API-Key": "history-key"},
+        params={"instrument": "XAU_USD", "granularity": "H4", "key": "history-key"},
     )
     after = datetime.now(timezone.utc)
 
@@ -131,8 +129,8 @@ def test_history_fetches_5000_candle_chunks_with_one_second_delay(
             "granularity": "H4",
             "from": start.isoformat(),
             "until": (second_time + timedelta(hours=4)).isoformat(),
+            "key": "history-key",
         },
-        headers={"X-API-Key": "history-key"},
     )
 
     assert response.status_code == 200
@@ -175,8 +173,8 @@ def test_history_until_is_exclusive_and_stops_pagination(
             "granularity": "H4",
             "from": start.isoformat(),
             "until": until.isoformat(),
+            "key": "history-key",
         },
-        headers={"X-API-Key": "history-key"},
     )
 
     assert response.status_code == 200
@@ -208,8 +206,8 @@ def test_history_can_stream_csv(history_client: TestClient) -> None:
             "from": at.isoformat(),
             "until": (at + timedelta(minutes=30)).isoformat(),
             "format": "csv",
+            "key": "history-key",
         },
-        headers={"X-API-Key": "history-key"},
     )
 
     assert response.status_code == 200
@@ -230,8 +228,7 @@ def test_history_rejects_granularities_outside_m5_m15_h4(
 ) -> None:
     response = history_client.get(
         "/ohlc/history",
-        params={"instrument": "XAU_USD", "granularity": granularity},
-        headers={"X-API-Key": "history-key"},
+        params={"instrument": "XAU_USD", "granularity": granularity, "key": "history-key"},
     )
 
     assert response.status_code == 422
@@ -245,8 +242,8 @@ def test_history_rejects_invalid_time_range(history_client: TestClient) -> None:
             "granularity": "H4",
             "from": "2026-01-02T00:00:00Z",
             "until": "2026-01-01T00:00:00Z",
+            "key": "history-key",
         },
-        headers={"X-API-Key": "history-key"},
     )
 
     assert response.status_code == 422
