@@ -181,15 +181,15 @@ Only midpoint (`M`) candles are requested. Incomplete candles are retained and m
 ## Usage: full historical export
 
 Use `GET /ohlc/history` for large H4, M15, or M5 downloads. This route is
-protected by a dedicated `HISTORICAL_API_KEY`; send it in the `X-API-Key`
-header. It never accepts or exposes the OANDA token as client authentication.
+protected by a dedicated `HISTORICAL_API_KEY`; send it as the `key` query
+parameter. It never accepts or exposes the OANDA token as client authentication.
 
 If `from` is omitted, the export starts at `2005-01-01T00:00:00Z`. If
 `until` is omitted, it uses the current request time. `until` is exclusive.
 
 ```bash
 curl --get 'http://localhost:8000/ohlc/history' \
-  -H 'X-API-Key: replace-with-a-long-random-token' \
+  --data-urlencode 'key=replace-with-a-long-random-token' \
   --data-urlencode 'instrument=XAU_USD' \
   --data-urlencode 'granularity=M15' \
   --data-urlencode 'from=2005-01-01T00:00:00Z' \
@@ -202,6 +202,7 @@ Supported historical parameters:
 
 | Parameter | Rules | Default |
 | --- | --- | --- |
+| `key` | historical API key matching `HISTORICAL_API_KEY` | required |
 | `instrument` | uppercase OANDA instrument such as `XAU_USD` | required |
 | `granularity` | `H4`, `M15`, or `M5` | required |
 | `from` | RFC3339 timestamp with timezone; inclusive | `2005-01-01T00:00:00Z` |
