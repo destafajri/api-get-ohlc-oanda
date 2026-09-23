@@ -91,13 +91,20 @@ def test_history_defaults_to_2005_and_now(history_client: TestClient) -> None:
 
 
 @respx.mock
-def test_history_fetches_5000_candle_chunks_with_one_second_delay(
+def test_history_continues_after_4999_include_first_page(
     history_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     start = datetime(2020, 1, 1, tzinfo=timezone.utc)
     first = [_candle(start + timedelta(hours=4 * index)) for index in range(5000)]
-    last_time = start + timedelta(hours=4 * 4999)
-    second_time = last_time + timedelta(hours=4)
+    first_last = start + timedelta(hours=4 * 4999)
+
+    second = [
+        _candle(first_last + timedelta(hours=4 * (index + 1)))
+        for index in range(4999)
+    ]
+    second_last = first_last + timedelta(hours=4 * 4999)
+    third_time = second_last + timedelta(hours=4)
+
     responses = [
         Response(
             200,
@@ -105,10 +112,14 @@ def test_history_fetches_5000_candle_chunks_with_one_second_delay(
         ),
         Response(
             200,
+            json={"instrument": "XAU_USD", "granularity": "H4", "candles": second},
+        ),
+        Response(
+            200,
             json={
                 "instrument": "XAU_USD",
                 "granularity": "H4",
-                "candles": [_candle(second_time)],
+                "candles": [_candle(third_time)],
             },
         ),
     ]
@@ -128,19 +139,27 @@ def test_history_fetches_5000_candle_chunks_with_one_second_delay(
             "instrument": "XAU_USD",
             "granularity": "H4",
             "from": start.isoformat(),
-            "until": (second_time + timedelta(hours=4)).isoformat(),
+            "until": (third_time + timedelta(hours=4)).isoformat(),
             "key": "history-key",
         },
     )
 
     assert response.status_code == 200
-    assert response.json()["count"] == 5001
-    assert route.call_count == 2
+    assert response.json()["count"] == 10000
+    assert route.call_count == 3
+
     second_params = route.calls[1].request.url.params
-    assert second_params["from"] == last_time.isoformat().replace("+00:00", "Z")
+    assert second_params["from"] == first_last.isoformat().replace("+00:00", "Z")
     assert second_params["count"] == "5000"
     assert second_params["includeFirst"] == "false"
-    sleep.assert_awaited_once_with(1.0)
+
+    third_params = route.calls[2].request.url.params
+    assert third_params["from"] == second_last.isoformat().replace("+00:00", "Z")
+    assert third_params["count"] == "5000"
+    assert third_params["includeFirst"] == "false"
+
+    assert sleep.await_count == 2
+    sleep.assert_awaited_with(1.0)
 
 
 @respx.mock
