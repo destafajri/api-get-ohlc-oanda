@@ -186,7 +186,7 @@ Use `GET /ohlc/history` for large H4, M15, or M5 downloads. This route is
 protected by a dedicated `HISTORICAL_API_KEY`; send it as the `key` query
 parameter. It never accepts or exposes the OANDA token as client authentication.
 
-If `from` is omitted, the export starts at `2005-01-01T00:00:00Z`. If
+If `from` is omitted, the export starts at `2006-03-19T22:00:00Z`. If
 `until` is omitted, it uses the current request time. `until` is exclusive.
 
 ```bash
@@ -194,7 +194,7 @@ curl --get 'http://localhost:8000/ohlc/history' \
   --data-urlencode 'key=replace-with-a-long-random-token' \
   --data-urlencode 'instrument=XAU_USD' \
   --data-urlencode 'granularity=M15' \
-  --data-urlencode 'from=2005-01-01T00:00:00Z' \
+  --data-urlencode 'from=2006-03-19T22:00:00Z' \
   --data-urlencode 'until=2026-09-23T08:51:40Z' \
   --data-urlencode 'format=csv' \
   --output XAU_USD-M15-history.csv
@@ -218,7 +218,7 @@ Supported historical parameters:
 | `key` | historical API key matching `HISTORICAL_API_KEY` | required |
 | `instrument` | uppercase OANDA instrument such as `XAU_USD` | required |
 | `granularity` | `H4`, `M15`, or `M5` | required |
-| `from` | RFC3339 timestamp with timezone; inclusive | `2005-01-01T00:00:00Z` |
+| `from` | RFC3339 timestamp with timezone; inclusive | `2006-03-19T22:00:00Z` |
 | `until` | RFC3339 timestamp with timezone; exclusive | request-time now |
 | `format` | `json`, `csv`, or `sqlite` | `json` |
 
@@ -249,7 +249,7 @@ can be downloaded, so very large M5 backfills are more likely to hit serverless
 runtime or temporary-disk limits. For long research histories, store the
 downloaded `.db` file on the research machine.
 
-A complete M5 export from 2005 can take a long time because the configured
+A complete M5 export from the first available XAU_USD candle can take a long time because the configured
 inter-chunk delay applies between every full historical page. On serverless hosts,
 that may exceed the platform's request-duration or response-size limits; run
 the service in an environment that permits long-lived streaming requests when
