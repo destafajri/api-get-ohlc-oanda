@@ -43,6 +43,7 @@ OANDA_ENVIRONMENT=practice
 OANDA_TIMEOUT_SECONDS=10
 HISTORICAL_API_KEY=replace-with-a-long-random-token
 HISTORICAL_CHUNK_DELAY_SECONDS=5
+HISTORICAL_PAGE_SIZE=2500
 RESEARCH_CONTEXT_TOKEN=replace-with-a-long-random-token
 MCP_AUTH_TOKEN=replace-with-a-long-random-token
 ```
@@ -221,9 +222,11 @@ Supported historical parameters:
 | `until` | RFC3339 timestamp with timezone; exclusive | request-time now |
 | `format` | `json`, `csv`, or `sqlite` | `json` |
 
-The service asks OANDA for at most 5,000 candles per upstream request. After a
-full page, it waits for `HISTORICAL_CHUNK_DELAY_SECONDS` before requesting the
-next page. The default delay is 5 seconds and can be changed without code changes.
+Historical exports request `HISTORICAL_PAGE_SIZE` candles per OANDA call. The
+default is 2,500 (OANDA's maximum is 5,000). After a full page, the service
+waits for `HISTORICAL_CHUNK_DELAY_SECONDS` before requesting the next page; the
+default delay is 5 seconds. Transient 429/502/503/504 responses are retried up
+to two times with 5s then 10s backoff when the default delay is used.
 Subsequent pages use OANDA's `includeFirst=false` behavior so the boundary
 candle is not duplicated. OANDA documents a maximum of 5,000 candles per
 request.
