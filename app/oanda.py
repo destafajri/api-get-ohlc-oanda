@@ -105,7 +105,7 @@ class OandaService:
         *,
         include_first: bool,
     ) -> list[Candle]:
-        """Fetch one OANDA history page capped at 5,000 candles."""
+        """Fetch one OANDA history page with retry for transient upstream failures."""
         url = f"{self.settings.oanda_base_url}/instruments/{query.instrument}/candles"
         headers = {
             "Authorization": f"Bearer {self.settings.oanda_token.get_secret_value()}",
@@ -114,26 +114,55 @@ class OandaService:
         params = {
             "granularity": query.granularity.value,
             "price": "M",
-            "count": "5000",
+            "count": str(self.settings.historical_page_size),
             "from": self._format_rfc3339(from_time),
             "includeFirst": "true" if include_first else "false",
         }
 
-        try:
-            response = await self.client.get(
-                url,
-                headers=headers,
-                params=params,
-                timeout=self.settings.oanda_timeout_seconds,
-            )
-        except httpx.TimeoutException as exc:
-            raise OandaServiceError(
-                504, "oanda_timeout", "OANDA did not respond before the timeout."
-            ) from exc
-        except httpx.RequestError as exc:
+        response: httpx.Response | None = None
+        max_attempts = 3
+        transient_statuses = {429, 502, 503, 504}
+
+        for attempt in range(max_attempts):
+            try:
+                response = await self.client.get(
+                    url,
+                    headers=headers,
+                    params=params,
+                    timeout=self.settings.oanda_timeout_seconds,
+                )
+            except (httpx.TimeoutException, httpx.RequestError) as exc:
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(
+                        self.settings.historical_chunk_delay_seconds * (attempt + 1)
+                    )
+                    continue
+                if isinstance(exc, httpx.TimeoutException):
+                    raise OandaServiceError(
+                        504,
+                        "oanda_timeout",
+                        "OANDA did not respond before the timeout after retries.",
+                    ) from exc
+                raise OandaServiceError(
+                    503,
+                    "oanda_unavailable",
+                    "OANDA is currently unavailable after retries.",
+                ) from exc
+
+            if (
+                response.status_code in transient_statuses
+                and attempt < max_attempts - 1
+            ):
+                await asyncio.sleep(
+                    self.settings.historical_chunk_delay_seconds * (attempt + 1)
+                )
+                continue
+            break
+
+        if response is None:
             raise OandaServiceError(
                 503, "oanda_unavailable", "OANDA is currently unavailable."
-            ) from exc
+            )
 
         if response.is_error:
             self._raise_for_error(response)
@@ -164,9 +193,9 @@ class OandaService:
         query: HistoricalOhlcQuery,
         first_chunk: list[Candle],
     ) -> AsyncIterator[Candle]:
-        """Yield history while paging 5,000 candles at a time with a configurable delay."""
+        """Yield history page by page with a configurable delay."""
         chunk = first_chunk
-        full_page_size = 5000
+        full_page_size = self.settings.historical_page_size
 
         while chunk:
             reached_until = False
@@ -198,10 +227,10 @@ class OandaService:
                 )
 
             # OANDA applies includeFirst=false to the candle covered by from.
-            # With count=5000, a full continuation page can therefore contain
-            # 4,999 returned candles. Treat 4,999 as full rather than EOF.
+            # A full continuation page can therefore contain one fewer candle
+            # than the requested count. Treat that as full rather than EOF.
             chunk = next_chunk
-            full_page_size = 4999
+            full_page_size = max(1, self.settings.historical_page_size - 1)
 
     async def get_research_context(self) -> ResearchContextResponse:
         headers = {
@@ -300,9 +329,23 @@ class OandaService:
             raise OandaServiceError(
                 503, "oanda_rate_limited", "OANDA rate limit reached. Try again later."
             )
-        if response.status_code == 400:
+        if response.status_code in (400, 422):
             raise OandaServiceError(
-                400, "invalid_oanda_request", upstream_message or "OANDA rejected the request."
+                response.status_code,
+                "invalid_oanda_request",
+                upstream_message or "OANDA rejected the request.",
+            )
+        if response.status_code == 502:
+            raise OandaServiceError(
+                502, "oanda_bad_gateway", "OANDA returned a bad gateway response."
+            )
+        if response.status_code == 503:
+            raise OandaServiceError(
+                503, "oanda_unavailable", "OANDA is currently unavailable."
+            )
+        if response.status_code == 504:
+            raise OandaServiceError(
+                504, "oanda_gateway_timeout", "OANDA upstream request timed out."
             )
         raise OandaServiceError(
             502, "oanda_error", "OANDA returned an unexpected error."
