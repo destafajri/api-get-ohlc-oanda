@@ -86,7 +86,7 @@ def test_history_page_size_can_be_configured() -> None:
 
 
 @respx.mock
-def test_history_defaults_to_2005_and_now(history_client: TestClient) -> None:
+def test_history_defaults_xau_usd_to_first_available_candle_and_now(history_client: TestClient) -> None:
     route = respx.get(
         "https://api-fxpractice.oanda.com/v3/instruments/XAU_USD/candles"
     ).mock(
@@ -105,12 +105,12 @@ def test_history_defaults_to_2005_and_now(history_client: TestClient) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["from"] == "2005-01-01T00:00:00Z"
+    assert payload["from"] == "2006-03-19T22:00:00Z"
     until = datetime.fromisoformat(payload["until"].replace("Z", "+00:00"))
     assert before <= until <= after
     assert payload["count"] == 0
     params = route.calls.last.request.url.params
-    assert params["from"] == "2005-01-01T00:00:00Z"
+    assert params["from"] == "2006-03-19T22:00:00Z"
     assert params["count"] == "2500"
     assert params["includeFirst"] == "true"
 
