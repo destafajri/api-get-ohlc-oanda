@@ -330,7 +330,6 @@ async def get_ohlc(
 async def get_historical_ohlc(
     request: Request,
     query: Annotated[HistoricalOhlcQuery, Query()],
-    x_api_key: Annotated[str | None, Header()] = None,
     settings: Settings = Depends(get_settings),
 ) -> Response:
     """Stream H4/M15/M5 history in 5,000-candle OANDA chunks."""
@@ -344,8 +343,8 @@ async def get_historical_ohlc(
         )
         return JSONResponse(status_code=503, content=body.model_dump())
 
-    if x_api_key is None or not compare_digest(
-        x_api_key, configured.get_secret_value()
+    if query.key is None or not compare_digest(
+        query.key, configured.get_secret_value()
     ):
         body = ErrorResponse(
             error=ErrorDetail(
