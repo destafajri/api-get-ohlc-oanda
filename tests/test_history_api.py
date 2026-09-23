@@ -434,6 +434,61 @@ def test_history_can_export_sqlite(history_client: TestClient) -> None:
     assert any(index[2] == 1 for index in indexes)
 
 
+@respx.mock
+def test_history_custom_filename_is_used_for_sqlite(history_client: TestClient) -> None:
+    at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    respx.get(
+        "https://api-fxpractice.oanda.com/v3/instruments/XAU_USD/candles"
+    ).mock(
+        return_value=Response(
+            200,
+            json={
+                "instrument": "XAU_USD",
+                "granularity": "M15",
+                "candles": [_candle(at)],
+            },
+        )
+    )
+
+    response = history_client.get(
+        "/ohlc/history",
+        params={
+            "instrument": "XAU_USD",
+            "granularity": "M15",
+            "from": at.isoformat(),
+            "until": (at + timedelta(minutes=30)).isoformat(),
+            "format": "sqlite",
+            "filename": "XAU_USD-M15-2026-01",
+            "key": "history-key",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="XAU_USD-M15-2026-01.db"'
+    )
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["../history", "history/file", 'history"file', "history file"],
+)
+def test_history_rejects_unsafe_custom_filename(
+    history_client: TestClient, filename: str
+) -> None:
+    response = history_client.get(
+        "/ohlc/history",
+        params={
+            "instrument": "XAU_USD",
+            "granularity": "H4",
+            "filename": filename,
+            "key": "history-key",
+        },
+    )
+
+    assert response.status_code == 422
+
+
 @pytest.mark.parametrize("granularity", ["M1", "D", "S5"])
 def test_history_rejects_granularities_outside_m5_m15_h4(
     history_client: TestClient, granularity: str

@@ -164,6 +164,17 @@ class HistoricalOhlcQuery(BaseModel):
         min_length=1,
         description="API key for historical OHLC access.",
     )
+    filename: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+        description=(
+            "Optional download filename without a required extension. "
+            "Allowed characters: letters, numbers, dot, underscore, and hyphen."
+        ),
+        examples=["XAU_USD-M15-2006-2007"],
+    )
     from_time: datetime = Field(
         default=datetime(2006, 3, 19, 22, 0, tzinfo=timezone.utc),
         alias="from",
