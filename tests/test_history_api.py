@@ -161,7 +161,7 @@ def test_history_continues_after_4999_include_first_page(
     assert third_params["includeFirst"] == "false"
 
     assert sleep.await_count == 2
-    sleep.assert_awaited_with(1.0)
+    sleep.assert_awaited_with(10.0)
 
 
 @respx.mock
