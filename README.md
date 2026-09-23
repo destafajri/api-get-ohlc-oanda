@@ -42,6 +42,7 @@ OANDA_TOKEN=your-token
 OANDA_ENVIRONMENT=practice
 OANDA_TIMEOUT_SECONDS=10
 HISTORICAL_API_KEY=replace-with-a-long-random-token
+HISTORICAL_CHUNK_DELAY_SECONDS=5
 RESEARCH_CONTEXT_TOKEN=replace-with-a-long-random-token
 MCP_AUTH_TOKEN=replace-with-a-long-random-token
 ```
@@ -221,7 +222,8 @@ Supported historical parameters:
 | `format` | `json`, `csv`, or `sqlite` | `json` |
 
 The service asks OANDA for at most 5,000 candles per upstream request. After a
-full 5,000-candle page, it waits 1 second before requesting the next page.
+full page, it waits for `HISTORICAL_CHUNK_DELAY_SECONDS` before requesting the
+next page. The default delay is 5 seconds and can be changed without code changes.
 Subsequent pages use OANDA's `includeFirst=false` behavior so the boundary
 candle is not duplicated. OANDA documents a maximum of 5,000 candles per
 request.
@@ -244,8 +246,8 @@ can be downloaded, so very large M5 backfills are more likely to hit serverless
 runtime or temporary-disk limits. For long research histories, store the
 downloaded `.db` file on the research machine.
 
-A complete M5 export from 2005 can take several minutes because the requested
-1-second pause applies between every 5,000-candle page. On serverless hosts,
+A complete M5 export from 2005 can take a long time because the configured
+inter-chunk delay applies between every full historical page. On serverless hosts,
 that may exceed the platform's request-duration or response-size limits; run
 the service in an environment that permits long-lived streaming requests when
 downloading the entire M5 history.
