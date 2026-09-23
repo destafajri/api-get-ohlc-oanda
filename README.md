@@ -208,7 +208,8 @@ curl --get 'http://localhost:8000/ohlc/history' \
   --data-urlencode 'instrument=XAU_USD' \
   --data-urlencode 'granularity=H4' \
   --data-urlencode 'format=sqlite' \
-  --output XAU_USD-H4-history.db
+  --data-urlencode 'filename=XAU_USD-H4-full' \
+  --output XAU_USD-H4-full.db
 ```
 
 Supported historical parameters:
@@ -221,6 +222,7 @@ Supported historical parameters:
 | `from` | RFC3339 timestamp with timezone; inclusive | `2006-03-19T22:00:00Z` |
 | `until` | RFC3339 timestamp with timezone; exclusive | request-time now |
 | `format` | `json`, `csv`, or `sqlite` | `json` |
+| `filename` | optional safe basename using letters, numbers, `.`, `_`, `-`; extension is added automatically | generated from instrument/granularity |
 
 Historical exports request `HISTORICAL_PAGE_SIZE` candles per OANDA call. The
 default is 2,500 (OANDA's maximum is 5,000). After a full page, the service
@@ -232,7 +234,9 @@ candle is not duplicated. OANDA documents a maximum of 5,000 candles per
 request.
 
 JSON and CSV are streamed and returned with `Cache-Control: no-store`.
-CSV responses are downloads such as `XAU_USD-M15-history.csv`; JSON responses
+Add `filename=XAU_USD-M15-2006-2007` to rename the downloaded export; the
+correct extension is added automatically. If `filename` is omitted, the
+existing generated name such as `XAU_USD-M15-history.csv` is used. JSON responses
 contain `instrument`, `granularity`, `from`, `until`, `candles`, and a
 final `count`.
 
