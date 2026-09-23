@@ -41,6 +41,12 @@ class OutputFormat(StrEnum):
     CSV = "csv"
 
 
+class HistoricalOutputFormat(StrEnum):
+    JSON = "json"
+    CSV = "csv"
+    SQLITE = "sqlite"
+
+
 class OhlcQuery(BaseModel):
     """Validated query modes for recent-count or explicit time-range requests."""
 
@@ -147,11 +153,11 @@ class HistoricalOhlcQuery(BaseModel):
         examples=["XAU_USD"],
     )
     granularity: HistoricalGranularity = Field(examples=["H4"])
-    output_format: OutputFormat = Field(
-        default=OutputFormat.JSON,
+    output_format: HistoricalOutputFormat = Field(
+        default=HistoricalOutputFormat.JSON,
         alias="format",
-        description="Response representation. JSON is the default.",
-        examples=["csv"],
+        description="Historical response representation. JSON is the default.",
+        examples=["csv", "sqlite"],
     )
     key: str | None = Field(
         default=None,

@@ -42,6 +42,7 @@ OANDA_TOKEN=your-token
 OANDA_ENVIRONMENT=practice
 OANDA_TIMEOUT_SECONDS=10
 HISTORICAL_API_KEY=replace-with-a-long-random-token
+HISTORICAL_CHUNK_DELAY_SECONDS=5
 RESEARCH_CONTEXT_TOKEN=replace-with-a-long-random-token
 MCP_AUTH_TOKEN=replace-with-a-long-random-token
 ```
@@ -198,6 +199,17 @@ curl --get 'http://localhost:8000/ohlc/history' \
   --output XAU_USD-M15-history.csv
 ```
 
+SQLite example:
+
+```bash
+curl --get 'http://localhost:8000/ohlc/history' \
+  --data-urlencode 'key=replace-with-a-long-random-token' \
+  --data-urlencode 'instrument=XAU_USD' \
+  --data-urlencode 'granularity=H4' \
+  --data-urlencode 'format=sqlite' \
+  --output XAU_USD-H4-history.db
+```
+
 Supported historical parameters:
 
 | Parameter | Rules | Default |
@@ -207,21 +219,35 @@ Supported historical parameters:
 | `granularity` | `H4`, `M15`, or `M5` | required |
 | `from` | RFC3339 timestamp with timezone; inclusive | `2005-01-01T00:00:00Z` |
 | `until` | RFC3339 timestamp with timezone; exclusive | request-time now |
-| `format` | `json` or `csv` | `json` |
+| `format` | `json`, `csv`, or `sqlite` | `json` |
 
 The service asks OANDA for at most 5,000 candles per upstream request. After a
-full 5,000-candle page, it waits 1 second before requesting the next page.
+full page, it waits for `HISTORICAL_CHUNK_DELAY_SECONDS` before requesting the
+next page. The default delay is 5 seconds and can be changed without code changes.
 Subsequent pages use OANDA's `includeFirst=false` behavior so the boundary
 candle is not duplicated. OANDA documents a maximum of 5,000 candles per
 request.
 
-Both formats are streamed and returned with `Cache-Control: no-store`.
+JSON and CSV are streamed and returned with `Cache-Control: no-store`.
 CSV responses are downloads such as `XAU_USD-M15-history.csv`; JSON responses
 contain `instrument`, `granularity`, `from`, `until`, `candles`, and a
 final `count`.
 
-A complete M5 export from 2005 can take several minutes because the requested
-1-second pause applies between every 5,000-candle page. On serverless hosts,
+Use `format=sqlite` to download a portable SQLite database such as
+`XAU_USD-H4-history.db`. The database contains one `candles` table with
+`instrument`, `timeframe`, `time`, OHLC values, `volume`, and
+`complete`. Its primary key is `(instrument, timeframe, time)`, so duplicate
+candles are rejected by the database schema.
+
+SQLite exports are built in temporary local storage and deleted after the
+response is sent; the Vercel filesystem is not used as persistent market-data
+storage. Unlike JSON/CSV streaming, the SQLite file must be assembled before it
+can be downloaded, so very large M5 backfills are more likely to hit serverless
+runtime or temporary-disk limits. For long research histories, store the
+downloaded `.db` file on the research machine.
+
+A complete M5 export from 2005 can take a long time because the configured
+inter-chunk delay applies between every full historical page. On serverless hosts,
 that may exceed the platform's request-duration or response-size limits; run
 the service in an environment that permits long-lived streaming requests when
 downloading the entire M5 history.

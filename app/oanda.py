@@ -164,7 +164,7 @@ class OandaService:
         query: HistoricalOhlcQuery,
         first_chunk: list[Candle],
     ) -> AsyncIterator[Candle]:
-        """Yield history while paging 5,000 candles at a time with a 1s delay."""
+        """Yield history while paging 5,000 candles at a time with a configurable delay."""
         chunk = first_chunk
         full_page_size = 5000
 
@@ -184,7 +184,7 @@ class OandaService:
             if last_time >= query.until_time:
                 return
 
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(self.settings.historical_chunk_delay_seconds)
             next_chunk = await self.get_historical_chunk(
                 query,
                 last_time,

@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     oanda_token: Annotated[SecretStr, Field(min_length=1)]
     oanda_environment: Literal["practice", "live"] = "practice"
     oanda_timeout_seconds: Annotated[float, Field(gt=0, le=60)] = 10.0
+    historical_chunk_delay_seconds: Annotated[float, Field(ge=0, le=60)] = 5.0
     research_context_token: SecretStr | None = None
     historical_api_key: SecretStr | None = None
 

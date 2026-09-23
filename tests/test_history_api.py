@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+import sqlite3
+import tempfile
 from unittest.mock import AsyncMock
 
 import pytest
@@ -58,6 +60,19 @@ def test_history_fails_closed_when_api_key_is_not_configured() -> None:
 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "historical_api_not_configured"
+
+
+def test_history_chunk_delay_defaults_to_five_seconds() -> None:
+    settings = Settings(oanda_token="test-token")
+    assert settings.historical_chunk_delay_seconds == 5.0
+
+
+def test_history_chunk_delay_can_be_configured() -> None:
+    settings = Settings(
+        oanda_token="test-token",
+        historical_chunk_delay_seconds=10,
+    )
+    assert settings.historical_chunk_delay_seconds == 10.0
 
 
 @respx.mock
@@ -159,7 +174,7 @@ def test_history_continues_after_4999_include_first_page(
     assert third_params["includeFirst"] == "false"
 
     assert sleep.await_count == 2
-    sleep.assert_awaited_with(1.0)
+    sleep.assert_awaited_with(5.0)
 
 
 @respx.mock
@@ -239,6 +254,100 @@ def test_history_can_stream_csv(history_client: TestClient) -> None:
     )
     assert "XAU_USD,M15,2026-01-01T00:00:00Z,4321.123" in response.text
     assert response.headers["Cache-Control"] == "no-store"
+
+
+@respx.mock
+def test_history_can_export_sqlite(history_client: TestClient) -> None:
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    respx.get(
+        "https://api-fxpractice.oanda.com/v3/instruments/XAU_USD/candles"
+    ).mock(
+        return_value=Response(
+            200,
+            json={
+                "instrument": "XAU_USD",
+                "granularity": "H4",
+                "candles": [
+                    _candle(start, "4321.125"),
+                    _candle(start + timedelta(hours=4), "4322.250"),
+                ],
+            },
+        )
+    )
+
+    response = history_client.get(
+        "/ohlc/history",
+        params={
+            "instrument": "XAU_USD",
+            "granularity": "H4",
+            "from": start.isoformat(),
+            "until": (start + timedelta(hours=8)).isoformat(),
+            "format": "sqlite",
+            "key": "history-key",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/vnd.sqlite3")
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="XAU_USD-H4-history.db"'
+    )
+
+    with tempfile.NamedTemporaryFile(suffix=".db") as database_file:
+        database_file.write(response.content)
+        database_file.flush()
+        with sqlite3.connect(database_file.name) as connection:
+            columns = [
+                row[1]
+                for row in connection.execute("PRAGMA table_info(candles)").fetchall()
+            ]
+            rows = connection.execute(
+                """
+                SELECT instrument, timeframe, time, open, high, low, close, volume, complete
+                FROM candles
+                ORDER BY time
+                """
+            ).fetchall()
+            indexes = connection.execute(
+                "PRAGMA index_list(candles)"
+            ).fetchall()
+
+    assert columns == [
+        "instrument",
+        "timeframe",
+        "time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "complete",
+    ]
+    assert rows == [
+        (
+            "XAU_USD",
+            "H4",
+            "2026-01-01T00:00:00Z",
+            4321.125,
+            4321.125,
+            4321.125,
+            4321.125,
+            10,
+            1,
+        ),
+        (
+            "XAU_USD",
+            "H4",
+            "2026-01-01T04:00:00Z",
+            4322.25,
+            4322.25,
+            4322.25,
+            4322.25,
+            10,
+            1,
+        ),
+    ]
+    assert any(index[2] == 1 for index in indexes)
 
 
 @pytest.mark.parametrize("granularity", ["M1", "D", "S5"])

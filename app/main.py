@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Annotated, AsyncIterator
 from uuid import uuid4
 
+from starlette.background import BackgroundTask
 from fastapi import Depends, FastAPI, Header, Query, Request, Response
 from fastapi.responses import (
     FileResponse,
@@ -16,6 +17,7 @@ from fastapi.responses import (
 
 from app.config import ConfigurationError, Settings, get_mcp_settings, get_settings
 from app.history_serializers import historical_csv_stream, historical_json_stream
+from app.history_sqlite import build_historical_sqlite
 from app.http_client import create_http_client
 from app.mcp_server import build_mcp_http_app, create_runtime_mcp_server, mcp_mount
 from app.models import (
@@ -23,6 +25,7 @@ from app.models import (
     ErrorResponse,
     HealthResponse,
     HistoricalOhlcQuery,
+    HistoricalOutputFormat,
     OhlcQuery,
     OhlcResponse,
     OutputFormat,
@@ -312,10 +315,13 @@ async def get_ohlc(
     "/ohlc/history",
     responses={
         200: {
-            "description": "Paginated historical OHLC data as streamed JSON or CSV.",
+            "description": "Paginated historical OHLC data as JSON, CSV, or SQLite.",
             "content": {
                 "application/json": {"schema": {"type": "object"}},
                 "text/csv": {"schema": {"type": "string"}},
+                "application/vnd.sqlite3": {
+                    "schema": {"type": "string", "format": "binary"}
+                },
             },
         },
         400: {"model": ErrorResponse},
@@ -332,7 +338,7 @@ async def get_historical_ohlc(
     query: Annotated[HistoricalOhlcQuery, Query()],
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    """Stream H4/M15/M5 history in 5,000-candle OANDA chunks."""
+    """Export H4/M15/M5 history in JSON, CSV, or SQLite."""
     configured = settings.historical_api_key
     if configured is None:
         body = ErrorResponse(
@@ -360,28 +366,45 @@ async def get_historical_ohlc(
         query.from_time,
         include_first=True,
     )
-    extension = query.output_format.value
+    extension = (
+        "db"
+        if query.output_format is HistoricalOutputFormat.SQLITE
+        else query.output_format.value
+    )
     filename = (
         f"{query.instrument}-{query.granularity.value}-history.{extension}"
     )
-    headers = {
-        "Content-Disposition": f'attachment; filename="{filename}"',
+    cache_headers = {
         "Cache-Control": "no-store",
         "CDN-Cache-Control": "no-store",
         "Vercel-CDN-Cache-Control": "no-store",
     }
+    download_headers = {
+        **cache_headers,
+        "Content-Disposition": f'attachment; filename="{filename}"',
+    }
 
-    if query.output_format is OutputFormat.CSV:
+    if query.output_format is HistoricalOutputFormat.CSV:
         return StreamingResponse(
             historical_csv_stream(service, query, first_chunk),
             media_type="text/csv",
-            headers=headers,
+            headers=download_headers,
+        )
+
+    if query.output_format is HistoricalOutputFormat.SQLITE:
+        database_path = await build_historical_sqlite(service, query, first_chunk)
+        return FileResponse(
+            database_path,
+            media_type="application/vnd.sqlite3",
+            filename=filename,
+            headers=cache_headers,
+            background=BackgroundTask(database_path.unlink, missing_ok=True),
         )
 
     return StreamingResponse(
         historical_json_stream(service, query, first_chunk),
         media_type="application/json",
-        headers=headers,
+        headers=download_headers,
     )
 
 
