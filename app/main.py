@@ -6,15 +6,23 @@ from typing import Annotated, AsyncIterator
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, Query, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    StreamingResponse,
+)
 
 from app.config import ConfigurationError, Settings, get_mcp_settings, get_settings
+from app.history_serializers import historical_csv_stream, historical_json_stream
 from app.http_client import create_http_client
 from app.mcp_server import build_mcp_http_app, create_runtime_mcp_server, mcp_mount
 from app.models import (
     ErrorDetail,
     ErrorResponse,
     HealthResponse,
+    HistoricalOhlcQuery,
     OhlcQuery,
     OhlcResponse,
     OutputFormat,
@@ -61,7 +69,7 @@ async def add_request_id(request: Request, call_next):  # type: ignore[no-untype
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
 
-    if request.url.path == "/research/oanda-context":
+    if request.url.path in {"/research/oanda-context", "/ohlc/history"}:
         response.headers["Cache-Control"] = "no-store"
         response.headers["CDN-Cache-Control"] = "no-store"
         response.headers["Vercel-CDN-Cache-Control"] = "no-store"
@@ -298,6 +306,84 @@ async def get_ohlc(
             headers={"Content-Disposition": f'inline; filename="{filename}"'},
         )
     return result
+
+
+@app.get(
+    "/ohlc/history",
+    responses={
+        200: {
+            "description": "Paginated historical OHLC data as streamed JSON or CSV.",
+            "content": {
+                "application/json": {"schema": {"type": "object"}},
+                "text/csv": {"schema": {"type": "string"}},
+            },
+        },
+        400: {"model": ErrorResponse},
+        401: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        502: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+        504: {"model": ErrorResponse},
+    },
+    tags=["market data"],
+)
+async def get_historical_ohlc(
+    request: Request,
+    query: Annotated[HistoricalOhlcQuery, Query()],
+    x_api_key: Annotated[str | None, Header()] = None,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """Stream H4/M15/M5 history in 5,000-candle OANDA chunks."""
+    configured = settings.historical_api_key
+    if configured is None:
+        body = ErrorResponse(
+            error=ErrorDetail(
+                code="historical_api_not_configured",
+                message="Historical OHLC access is not configured.",
+            )
+        )
+        return JSONResponse(status_code=503, content=body.model_dump())
+
+    if x_api_key is None or not compare_digest(
+        x_api_key, configured.get_secret_value()
+    ):
+        body = ErrorResponse(
+            error=ErrorDetail(
+                code="historical_api_unauthorized",
+                message="Valid historical OHLC authorization is required.",
+            )
+        )
+        return JSONResponse(status_code=401, content=body.model_dump())
+
+    service = OandaService(request.app.state.http_client, settings)
+    first_chunk = await service.get_historical_chunk(
+        query,
+        query.from_time,
+        include_first=True,
+    )
+    extension = query.output_format.value
+    filename = (
+        f"{query.instrument}-{query.granularity.value}-history.{extension}"
+    )
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Cache-Control": "no-store",
+        "CDN-Cache-Control": "no-store",
+        "Vercel-CDN-Cache-Control": "no-store",
+    }
+
+    if query.output_format is OutputFormat.CSV:
+        return StreamingResponse(
+            historical_csv_stream(service, query, first_chunk),
+            media_type="text/csv",
+            headers=headers,
+        )
+
+    return StreamingResponse(
+        historical_json_stream(service, query, first_chunk),
+        media_type="application/json",
+        headers=headers,
+    )
 
 
 # Keep this fallback mount last so the existing REST/docs routes retain priority.
