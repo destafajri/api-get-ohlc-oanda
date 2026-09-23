@@ -371,8 +371,15 @@ async def get_historical_ohlc(
         if query.output_format is HistoricalOutputFormat.SQLITE
         else query.output_format.value
     )
+    filename_base = (
+        query.filename
+        if query.filename is not None
+        else f"{query.instrument}-{query.granularity.value}-history"
+    )
     filename = (
-        f"{query.instrument}-{query.granularity.value}-history.{extension}"
+        filename_base
+        if filename_base.lower().endswith(f".{extension}")
+        else f"{filename_base}.{extension}"
     )
     cache_headers = {
         "Cache-Control": "no-store",
