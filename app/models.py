@@ -165,10 +165,10 @@ class HistoricalOhlcQuery(BaseModel):
         description="API key for historical OHLC access.",
     )
     from_time: datetime = Field(
-        default=datetime(2005, 1, 1, tzinfo=timezone.utc),
+        default=datetime(2006, 3, 19, 22, 0, tzinfo=timezone.utc),
         alias="from",
-        description="Inclusive start. Defaults to 2005-01-01T00:00:00Z.",
-        examples=["2005-01-01T00:00:00Z"],
+        description="Inclusive start. Defaults to the first available XAU_USD candle: 2006-03-19T22:00:00Z.",
+        examples=["2006-03-19T22:00:00Z"],
     )
     until_time: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
