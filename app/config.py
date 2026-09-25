@@ -51,6 +51,10 @@ class McpSettings(BaseSettings):
     # Legacy/static Bearer access for clients such as Codex and Claude Code.
     mcp_auth_token: SecretStr | None = None
 
+    # Explicit opt-in for an unauthenticated read-only MCP endpoint. Keep this
+    # disabled by default so existing deployments remain fail-closed.
+    mcp_public_access: bool = False
+
     # OAuth resource-server settings. When all three are configured, the MCP
     # endpoint advertises RFC 9728 metadata and validates OAuth JWTs while still
     # accepting MCP_AUTH_TOKEN when it is present.
