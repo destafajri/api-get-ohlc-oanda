@@ -7,6 +7,7 @@ Use the `oanda_market_data` MCP server and its `get_ohlc` tool whenever the user
 
 Rules:
 
+- Use `list_instruments` when the user asks what instruments are available or when the exact OANDA symbol is unknown.
 - Use OANDA instrument names such as `XAU_USD`.
 - Use `count` for recent candles.
 - Use `start_time` and optional `end_time` for historical ranges; do not combine them with `count`.
