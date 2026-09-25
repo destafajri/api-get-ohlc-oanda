@@ -9,6 +9,8 @@ from app.config import Settings
 from app.models import (
     Candle,
     HistoricalOhlcQuery,
+    InstrumentSummary,
+    InstrumentsResponse,
     OhlcQuery,
     OhlcResponse,
     ResearchAccountContext,
@@ -231,6 +233,74 @@ class OandaService:
             # than the requested count. Treat that as full rather than EOF.
             chunk = next_chunk
             full_page_size = max(1, self.settings.historical_page_size - 1)
+
+    async def get_instruments(self, account_id: str) -> InstrumentsResponse:
+        url = f"{self.settings.oanda_base_url}/accounts/{account_id}/instruments"
+        headers = {
+            "Authorization": f"Bearer {self.settings.oanda_token.get_secret_value()}",
+        }
+
+        try:
+            response = await self.client.get(
+                url,
+                headers=headers,
+                timeout=self.settings.oanda_timeout_seconds,
+            )
+        except httpx.TimeoutException as exc:
+            raise OandaServiceError(
+                504, "oanda_timeout", "OANDA did not respond before the timeout."
+            ) from exc
+        except httpx.RequestError as exc:
+            raise OandaServiceError(
+                503, "oanda_unavailable", "OANDA is currently unavailable."
+            ) from exc
+
+        if response.status_code == 404:
+            raise OandaServiceError(
+                502,
+                "oanda_account_not_found",
+                "Configured OANDA account was not found.",
+            )
+        if response.is_error:
+            self._raise_for_error(response)
+
+        try:
+            payload: dict[str, Any] = response.json()
+            raw_instruments = payload["instruments"]
+            if not isinstance(raw_instruments, list):
+                raise TypeError
+
+            instruments: list[InstrumentSummary] = []
+            for item in raw_instruments:
+                if not isinstance(item, dict):
+                    raise TypeError
+                name = item["name"]
+                display_name = item["displayName"]
+                instrument_type = item["type"]
+                if not all(
+                    isinstance(value, str)
+                    for value in (name, display_name, instrument_type)
+                ):
+                    raise TypeError
+                instruments.append(
+                    InstrumentSummary(
+                        name=name,
+                        display_name=display_name,
+                        type=instrument_type,
+                    )
+                )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OandaServiceError(
+                502,
+                "invalid_oanda_response",
+                "OANDA returned an unexpected response.",
+            ) from exc
+
+        return InstrumentsResponse(
+            environment=self.settings.oanda_environment,
+            count=len(instruments),
+            instruments=instruments,
+        )
 
     async def get_research_context(self) -> ResearchContextResponse:
         headers = {
