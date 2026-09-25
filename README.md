@@ -5,6 +5,7 @@ A production-minimal FastAPI service that fetches midpoint candlesticks from OAN
 ## Features
 
 - `GET /ohlc` with validated recent-count and historical time-range modes
+- `GET /instruments` for the tradeable instruments available to the configured OANDA account
 - protected `GET /ohlc/history` for paginated H4/M15/M5 full-history exports
 - async upstream calls with connection pooling and timeouts
 - normalized OHLC response; decimal prices remain strings to preserve precision
@@ -39,6 +40,7 @@ Edit `.env` with your own credentials:
 
 ```dotenv
 OANDA_TOKEN=your-token
+OANDA_ACCOUNT_ID=your-account-id
 OANDA_ENVIRONMENT=practice
 OANDA_TIMEOUT_SECONDS=10
 HISTORICAL_API_KEY=replace-with-a-long-random-token
@@ -48,7 +50,7 @@ RESEARCH_CONTEXT_TOKEN=replace-with-a-long-random-token
 MCP_AUTH_TOKEN=replace-with-a-long-random-token
 ```
 
-`OANDA_ENVIRONMENT` accepts only `practice` or `live`. This instrument candles endpoint does not need an OANDA account ID. The bearer token is never returned by the API or logged by the application.
+`OANDA_ENVIRONMENT` accepts only `practice` or `live`. The candles endpoint does not need an OANDA account ID, while `GET /instruments` uses `OANDA_ACCOUNT_ID` to query the instruments available to that account. Neither the bearer token nor account ID is returned by the API.
 
 Start the server:
 
@@ -57,6 +59,29 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 Open [http://localhost:8000/docs](http://localhost:8000/docs) for Swagger UI.
+
+## Usage: available instruments
+
+List the instruments tradeable by the configured OANDA account:
+
+```bash
+curl 'http://localhost:8000/instruments'
+```
+
+Example response:
+
+```json
+{
+  "environment": "practice",
+  "count": 2,
+  "instruments": [
+    {"name": "XAU_USD", "display_name": "Gold", "type": "METAL"},
+    {"name": "EUR_USD", "display_name": "EUR/USD", "type": "CURRENCY"}
+  ]
+}
+```
+
+The result is account-specific because OANDA determines tradeable instruments from the account's regulatory division. The response is served with `Cache-Control: no-store`.
 
 ## Usage: latest candles
 
