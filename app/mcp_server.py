@@ -28,7 +28,7 @@ from app.config import (
 )
 from app.http_client import create_http_client
 from app.mcp_auth import CompositeTokenVerifier, McpOAuthConfigurationError
-from app.models import Candle, Granularity, OhlcQuery
+from app.models import Candle, Granularity, InstrumentsResponse, OhlcQuery
 from app.oanda import OandaService, OandaServiceError
 
 
@@ -77,7 +77,8 @@ def create_mcp_server(
         auth=auth,
         token_verifier=token_verifier,
         instructions=(
-            "Use get_ohlc to retrieve normalized midpoint candlestick data from OANDA. "
+            "Use list_instruments to discover the instruments available to the configured "
+            "OANDA account. Use get_ohlc to retrieve normalized midpoint candlestick data. "
             "Use count for recent candles, or start_time/end_time for historical ranges."
         ),
         lifespan=mcp_lifespan,
@@ -165,6 +166,30 @@ def create_mcp_server(
             returned_count=result.count,
             candles=result.candles,
         )
+
+    @server.tool()
+    async def list_instruments(
+        ctx: Context[McpContext],
+    ) -> InstrumentsResponse:
+        """List instruments available to the configured OANDA account."""
+
+        try:
+            settings = get_settings()
+        except ConfigurationError as exc:
+            raise ToolError(
+                "OANDA configuration is missing or invalid on the MCP server."
+            ) from exc
+
+        service = OandaService(ctx.request_context.lifespan_context.http_client, settings)
+        account_id = (
+            settings.oanda_account_id.get_secret_value()
+            if settings.oanda_account_id is not None
+            else None
+        )
+        try:
+            return await service.get_instruments(account_id)
+        except OandaServiceError as exc:
+            raise ToolError(f"{exc.code}: {exc.message}") from exc
 
     return server
 
