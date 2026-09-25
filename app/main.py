@@ -239,17 +239,9 @@ async def get_instruments(
 ) -> InstrumentsResponse | Response:
     """Return instruments tradeable by the configured OANDA account."""
     configured = settings.oanda_account_id
-    if configured is None:
-        body = ErrorResponse(
-            error=ErrorDetail(
-                code="instrument_list_not_configured",
-                message="OANDA account ID is required to list instruments.",
-            )
-        )
-        return JSONResponse(status_code=503, content=body.model_dump())
-
+    account_id = configured.get_secret_value() if configured is not None else None
     service = OandaService(request.app.state.http_client, settings)
-    return await service.get_instruments(configured.get_secret_value())
+    return await service.get_instruments(account_id)
 
 
 @app.get(
