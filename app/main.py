@@ -26,6 +26,7 @@ from app.models import (
     HealthResponse,
     HistoricalOhlcQuery,
     HistoricalOutputFormat,
+    InstrumentsResponse,
     OhlcQuery,
     OhlcResponse,
     OutputFormat,
@@ -72,7 +73,7 @@ async def add_request_id(request: Request, call_next):  # type: ignore[no-untype
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
 
-    if request.url.path in {"/research/oanda-context", "/ohlc/history"}:
+    if request.url.path in {"/instruments", "/research/oanda-context", "/ohlc/history"}:
         response.headers["Cache-Control"] = "no-store"
         response.headers["CDN-Cache-Control"] = "no-store"
         response.headers["Vercel-CDN-Cache-Control"] = "no-store"
@@ -220,6 +221,35 @@ async def health() -> HealthResponse:
 @app.head("/health", include_in_schema=False)
 async def head_health() -> Response:
     return Response(status_code=200, media_type="application/json")
+
+
+@app.get(
+    "/instruments",
+    response_model=InstrumentsResponse,
+    responses={
+        502: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+        504: {"model": ErrorResponse},
+    },
+    tags=["market data"],
+)
+async def get_instruments(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> InstrumentsResponse | Response:
+    """Return instruments tradeable by the configured OANDA account."""
+    configured = settings.oanda_account_id
+    if configured is None:
+        body = ErrorResponse(
+            error=ErrorDetail(
+                code="instrument_list_not_configured",
+                message="OANDA account ID is required to list instruments.",
+            )
+        )
+        return JSONResponse(status_code=503, content=body.model_dump())
+
+    service = OandaService(request.app.state.http_client, settings)
+    return await service.get_instruments(configured.get_secret_value())
 
 
 @app.get(
