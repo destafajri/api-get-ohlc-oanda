@@ -231,6 +231,18 @@ class HealthResponse(BaseModel):
     status: str = "ok"
 
 
+class InstrumentSummary(BaseModel):
+    name: str
+    display_name: str
+    type: str
+
+
+class InstrumentsResponse(BaseModel):
+    environment: str
+    count: int = Field(ge=0)
+    instruments: list[InstrumentSummary]
+
+
 class ResearchAccountContext(BaseModel):
     site_id: str
     division_id: str
