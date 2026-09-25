@@ -32,11 +32,11 @@ def configured_environment(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.anyio
-async def test_mcp_advertises_only_get_ohlc() -> None:
+async def test_mcp_advertises_market_data_tools() -> None:
     async with Client(mcp_server) as client:
         tools = await client.list_tools()
 
-    assert [tool.name for tool in tools.tools] == ["get_ohlc"]
+    assert [tool.name for tool in tools.tools] == ["get_ohlc", "list_instruments"]
     tool = tools.tools[0]
     assert set(tool.input_schema["properties"]) == {
         "instrument",
@@ -107,6 +107,56 @@ async def test_get_ohlc_tool_reuses_oanda_service_and_returns_structured_data() 
     assert route.called
     assert route.calls.last.request.headers["Authorization"] == "Bearer test-token"
     assert route.calls.last.request.url.params["count"] == "1"
+
+
+@pytest.mark.anyio
+@respx.mock
+async def test_list_instruments_tool_reuses_oanda_service() -> None:
+    accounts_route = respx.get(
+        "https://api-fxpractice.oanda.com/v3/accounts"
+    ).mock(
+        return_value=Response(
+            200,
+            json={"accounts": [{"id": "101-003-40074911-001"}]},
+        )
+    )
+    instruments_route = respx.get(
+        "https://api-fxpractice.oanda.com/v3/accounts/"
+        "101-003-40074911-001/instruments"
+    ).mock(
+        return_value=Response(
+            200,
+            json={
+                "instruments": [
+                    {
+                        "name": "XAU_USD",
+                        "displayName": "Gold",
+                        "type": "METAL",
+                    },
+                    {
+                        "name": "EUR_USD",
+                        "displayName": "EUR/USD",
+                        "type": "CURRENCY",
+                    },
+                ]
+            },
+        )
+    )
+
+    async with Client(mcp_server) as client:
+        result = await client.call_tool("list_instruments", {})
+
+    assert result.is_error is False
+    assert result.structured_content == {
+        "environment": "practice",
+        "count": 2,
+        "instruments": [
+            {"name": "XAU_USD", "display_name": "Gold", "type": "METAL"},
+            {"name": "EUR_USD", "display_name": "EUR/USD", "type": "CURRENCY"},
+        ],
+    }
+    assert accounts_route.called
+    assert instruments_route.called
 
 
 @pytest.mark.anyio
