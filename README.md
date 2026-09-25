@@ -331,20 +331,23 @@ the OANDA request or normalization logic.
 - local endpoint: `http://localhost:8000/mcp/`
 - transport: MCP Streamable HTTP
 - mode: stateless HTTP with JSON responses
-- tools: `get_ohlc`
+- tools: `get_ohlc`, `list_instruments`
 - OAuth discovery: `/.well-known/oauth-protected-resource/mcp/`
 - legacy HTTP+SSE transport is not exposed
 
 The trailing slash on `/mcp/` is intentional and is part of the OAuth resource
 identifier.
 
-Two authentication modes are supported:
+Three access modes are supported:
 
-1. **OAuth 2.1 resource-server mode** for hosted clients such as ChatGPT. The
+1. **Public no-auth mode** for an intentionally public, read-only MCP endpoint.
+   Enable it explicitly with `MCP_PUBLIC_ACCESS=true`. This is useful for a
+   private ChatGPT MCP App when you accept that the endpoint URL itself is public.
+2. **OAuth 2.1 resource-server mode** for authenticated hosted clients. The
    MCP server publishes Protected Resource Metadata and validates RS256 JWT
    access tokens against the configured issuer, JWKS, exact resource audience,
    expiry, and the required `openid` scope.
-2. **Static Bearer compatibility mode** for clients such as Codex and Claude
+3. **Static Bearer compatibility mode** for clients such as Codex and Claude
    Code. When `MCP_AUTH_TOKEN` is configured, that token remains accepted even
    while OAuth mode is enabled.
 
@@ -353,10 +356,11 @@ issuance, user login, PKCE, client registration/CIMD, refresh tokens, and
 consent are delegated to a standards-compatible OAuth authorization server.
 This keeps the Vercel deployment stateless.
 
-If any OAuth variable is configured, all OAuth variables must be configured
-together. Partial OAuth configuration fails closed with HTTP `503`. With
-OAuth disabled, `MCP_AUTH_TOKEN` is required and missing/empty configuration
-also fails closed.
+If `MCP_PUBLIC_ACCESS=true`, OAuth and static Bearer checks are bypassed for
+the MCP endpoint. Otherwise, if any OAuth variable is configured, all OAuth
+variables must be configured together; partial OAuth configuration fails closed
+with HTTP `503`. With OAuth disabled and public access off, `MCP_AUTH_TOKEN`
+is required and missing/empty configuration also fails closed.
 
 ### MCP environment variables
 
@@ -366,8 +370,11 @@ OANDA_TOKEN=your-oanda-token
 OANDA_ENVIRONMENT=practice
 OANDA_TIMEOUT_SECONDS=10
 
-# Optional static Bearer access. Required when OAuth is disabled.
+# Optional static Bearer access. Required when OAuth is disabled and public access is off.
 MCP_AUTH_TOKEN=replace-with-a-long-random-token
+
+# Explicit opt-in for an unauthenticated read-only MCP endpoint.
+MCP_PUBLIC_ACCESS=false
 
 # OAuth resource-server mode: configure all three together.
 MCP_PUBLIC_URL=https://<deployment-host>/mcp/
@@ -416,6 +423,13 @@ Tool results are structured data with:
 
 Prices remain decimal strings to avoid floating-point precision loss. OANDA
 credentials and the MCP access token are never included in tool results.
+
+### `list_instruments` tool
+
+`list_instruments` takes no user arguments. It returns the instruments available
+to the configured OANDA account as structured data containing `environment`,
+`count`, and `instruments`. Each instrument contains `name`, `display_name`,
+and `type`. Use it to discover canonical OANDA symbols before calling `get_ohlc`.
 
 ### Vercel deployment
 
