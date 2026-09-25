@@ -10,6 +10,12 @@ The MCP server remains authenticated by default. To intentionally expose the rea
 MCP_PUBLIC_ACCESS=true
 ```
 
+For ChatGPT Web, also allow the ChatGPT origins:
+
+```text
+MCP_ALLOWED_ORIGINS=https://chatgpt.com,https://chat.openai.com
+```
+
 Then redeploy the service.
 
 No OAuth configuration is required for this mode:
@@ -26,9 +32,21 @@ may remain unset.
 
 ## Security trade-off
 
-Public mode exposes the MCP endpoint to anyone who can reach its URL. The current MCP surface is read-only and exposes `get_ohlc`, but callers can still consume server and OANDA request quota.
+Public mode exposes the MCP endpoint to anyone who can reach its URL. The current MCP surface is read-only and exposes `get_ohlc` and `list_instruments`, but callers can still consume server and OANDA request quota.
 
 Keep `MCP_PUBLIC_ACCESS=false` unless public access is intentional.
+
+## ChatGPT Web MCP App
+
+Create an MCP App in ChatGPT with:
+
+```text
+Name: OANDA Market Data
+Server URL: https://api-get-ohlc-oanda.vercel.app/mcp/
+Authentication: No authentication
+```
+
+The discovered tools should include `get_ohlc` and `list_instruments`.
 
 ## Build the plugin archive
 
