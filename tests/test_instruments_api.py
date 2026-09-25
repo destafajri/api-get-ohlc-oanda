@@ -62,14 +62,61 @@ def test_get_instruments_returns_normalized_account_instruments(
     assert response.headers["Cache-Control"] == "no-store"
 
 
-def test_get_instruments_requires_account_configuration(client: TestClient) -> None:
+@respx.mock
+def test_get_instruments_discovers_account_when_not_configured(
+    client: TestClient,
+) -> None:
+    accounts_route = respx.get(
+        "https://api-fxpractice.oanda.com/v3/accounts"
+    ).mock(
+        return_value=Response(
+            200,
+            json={"accounts": [{"id": "101-001-12345678-001"}]},
+        )
+    )
+    instruments_route = respx.get(
+        "https://api-fxpractice.oanda.com/v3/accounts/"
+        "101-001-12345678-001/instruments"
+    ).mock(
+        return_value=Response(
+            200,
+            json={
+                "instruments": [
+                    {
+                        "name": "XAU_USD",
+                        "displayName": "Gold",
+                        "type": "METAL",
+                    }
+                ]
+            },
+        )
+    )
+
     response = client.get("/instruments")
 
-    assert response.status_code == 503
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+    assert response.json()["instruments"][0]["name"] == "XAU_USD"
+    assert accounts_route.called
+    assert instruments_route.called
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+@respx.mock
+def test_get_instruments_returns_safe_error_when_token_has_no_accounts(
+    client: TestClient,
+) -> None:
+    respx.get("https://api-fxpractice.oanda.com/v3/accounts").mock(
+        return_value=Response(200, json={"accounts": []})
+    )
+
+    response = client.get("/instruments")
+
+    assert response.status_code == 502
     assert response.json() == {
         "error": {
-            "code": "instrument_list_not_configured",
-            "message": "OANDA account ID is required to list instruments.",
+            "code": "oanda_account_not_found",
+            "message": "No OANDA account is available for the configured token.",
         }
     }
 
