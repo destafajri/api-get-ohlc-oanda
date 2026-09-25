@@ -234,11 +234,59 @@ class OandaService:
             chunk = next_chunk
             full_page_size = max(1, self.settings.historical_page_size - 1)
 
-    async def get_instruments(self, account_id: str) -> InstrumentsResponse:
-        url = f"{self.settings.oanda_base_url}/accounts/{account_id}/instruments"
+    async def get_instruments(self, account_id: str | None = None) -> InstrumentsResponse:
         headers = {
             "Authorization": f"Bearer {self.settings.oanda_token.get_secret_value()}",
         }
+
+        if account_id is None:
+            accounts_url = f"{self.settings.oanda_base_url}/accounts"
+            try:
+                accounts_response = await self.client.get(
+                    accounts_url,
+                    headers=headers,
+                    timeout=self.settings.oanda_timeout_seconds,
+                )
+            except httpx.TimeoutException as exc:
+                raise OandaServiceError(
+                    504, "oanda_timeout", "OANDA did not respond before the timeout."
+                ) from exc
+            except httpx.RequestError as exc:
+                raise OandaServiceError(
+                    503, "oanda_unavailable", "OANDA is currently unavailable."
+                ) from exc
+
+            if accounts_response.is_error:
+                self._raise_for_error(accounts_response)
+
+            try:
+                accounts_payload: dict[str, Any] = accounts_response.json()
+                raw_accounts = accounts_payload["accounts"]
+                if not isinstance(raw_accounts, list):
+                    raise TypeError
+                if not raw_accounts:
+                    raise OandaServiceError(
+                        502,
+                        "oanda_account_not_found",
+                        "No OANDA account is available for the configured token.",
+                    )
+                first_account = raw_accounts[0]
+                if not isinstance(first_account, dict):
+                    raise TypeError
+                discovered_account_id = first_account["id"]
+                if not isinstance(discovered_account_id, str):
+                    raise TypeError
+                account_id = discovered_account_id
+            except OandaServiceError:
+                raise
+            except (KeyError, TypeError, ValueError) as exc:
+                raise OandaServiceError(
+                    502,
+                    "invalid_oanda_response",
+                    "OANDA returned an unexpected response.",
+                ) from exc
+
+        url = f"{self.settings.oanda_base_url}/accounts/{account_id}/instruments"
 
         try:
             response = await self.client.get(
