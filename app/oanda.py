@@ -293,6 +293,7 @@ class OandaService:
                 url,
                 headers=headers,
                 timeout=self.settings.oanda_timeout_seconds,
+                follow_redirects=True,
             )
         except httpx.TimeoutException as exc:
             raise OandaServiceError(

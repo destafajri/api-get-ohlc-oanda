@@ -122,6 +122,60 @@ def test_get_instruments_returns_safe_error_when_token_has_no_accounts(
 
 
 @respx.mock
+def test_get_instruments_follows_oanda_temporary_redirect(
+    client: TestClient,
+) -> None:
+    accounts_route = respx.get(
+        "https://api-fxpractice.oanda.com/v3/accounts"
+    ).mock(
+        return_value=Response(
+            200,
+            json={"accounts": [{"id": "101-003-40074911-001"}]},
+        )
+    )
+    redirect_route = respx.get(
+        "https://api-fxpractice.oanda.com/v3/accounts/"
+        "101-003-40074911-001/instruments"
+    ).mock(
+        return_value=Response(
+            307,
+            headers={
+                "Location": (
+                    "https://api-fxpractice.oanda.com/v3/accounts/"
+                    "101-003-40074911-001/instruments/"
+                )
+            },
+        )
+    )
+    final_route = respx.get(
+        "https://api-fxpractice.oanda.com/v3/accounts/"
+        "101-003-40074911-001/instruments/"
+    ).mock(
+        return_value=Response(
+            200,
+            json={
+                "instruments": [
+                    {
+                        "name": "XAU_USD",
+                        "displayName": "Gold",
+                        "type": "METAL",
+                    }
+                ]
+            },
+        )
+    )
+
+    response = client.get("/instruments")
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+    assert response.json()["instruments"][0]["name"] == "XAU_USD"
+    assert accounts_route.called
+    assert redirect_route.called
+    assert final_route.called
+
+
+@respx.mock
 def test_get_instruments_rejects_malformed_oanda_response(
     client: TestClient,
 ) -> None:
