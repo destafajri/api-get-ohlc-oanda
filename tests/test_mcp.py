@@ -20,6 +20,7 @@ def configured_environment(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("OANDA_TOKEN", "test-token")
     monkeypatch.setenv("OANDA_ENVIRONMENT", "practice")
     monkeypatch.setenv("MCP_AUTH_TOKEN", "mcp-test-token")
+    monkeypatch.setenv("MCP_PUBLIC_ACCESS", "false")
     monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
     monkeypatch.delenv("MCP_OAUTH_ISSUER_URL", raising=False)
     monkeypatch.delenv("MCP_OAUTH_JWKS_URL", raising=False)
@@ -177,6 +178,27 @@ def test_streamable_http_endpoint_initializes_with_bearer_auth() -> None:
     assert payload["result"]["serverInfo"]["name"] == "OANDA OHLC MCP"
     assert response.headers["Cache-Control"] == "no-store"
     assert "Mcp-Session-Id" not in response.headers
+
+
+def test_streamable_http_endpoint_allows_explicit_public_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MCP_PUBLIC_ACCESS", "true")
+    monkeypatch.delenv("MCP_AUTH_TOKEN", raising=False)
+    get_mcp_settings.cache_clear()
+    server = create_mcp_server()
+    http_app = build_mcp_http_app(server)
+
+    with TestClient(http_app, base_url="http://localhost") as client:
+        response = client.post(
+            "/mcp/",
+            json=_initialize_payload(),
+            headers={"Accept": "application/json, text/event-stream"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["result"]["serverInfo"]["name"] == "OANDA OHLC MCP"
+    assert response.headers["Cache-Control"] == "no-store"
 
 
 def test_fastapi_mount_exposes_mcp_endpoint(client: TestClient) -> None:
