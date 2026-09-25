@@ -1,0 +1,17 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "oanda-market-data",
+  "version": "0.1.0",
+  "description": "Retrieve normalized OANDA OHLC candlestick data for quantitative research and market analysis.",
+  "author": {
+    "name": "destafajri"
+  },
+  "repository": "https://github.com/destafajri/api-get-ohlc-oanda",
+  "keywords": [
+    "oanda",
+    "ohlc",
+    "market-data",
+    "trading",
+    "xauusd"
+  ]
+}
