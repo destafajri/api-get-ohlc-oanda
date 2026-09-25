@@ -172,6 +172,9 @@ def create_mcp_server(
 def create_runtime_mcp_server(settings: McpSettings) -> MCPServer:
     """Create a fresh HTTP runtime server for one ASGI application lifespan."""
 
+    if settings.mcp_public_access:
+        return create_mcp_server()
+
     try:
         oauth_values = _oauth_values(settings)
     except McpOAuthConfigurationError:
@@ -394,11 +397,12 @@ def build_mcp_http_app(
     )
 
     oauth_error: McpOAuthConfigurationError | None = None
-    try:
-        oauth_values = _oauth_values(settings)
-    except McpOAuthConfigurationError as exc:
-        oauth_values = None
-        oauth_error = exc
+    oauth_values: tuple[AnyHttpUrl, AnyHttpUrl, AnyHttpUrl] | None = None
+    if not settings.mcp_public_access:
+        try:
+            oauth_values = _oauth_values(settings)
+        except McpOAuthConfigurationError as exc:
+            oauth_error = exc
 
     app: ASGIApp = server.streamable_http_app(
         streamable_http_path="/mcp/",
@@ -407,10 +411,11 @@ def build_mcp_http_app(
         transport_security=transport_security,
     )
 
-    if oauth_error is not None:
-        app = MisconfiguredMcpApp(app, str(oauth_error))
-    elif oauth_values is None:
-        app = McpBearerAuthMiddleware(app)
+    if not settings.mcp_public_access:
+        if oauth_error is not None:
+            app = MisconfiguredMcpApp(app, str(oauth_error))
+        elif oauth_values is None:
+            app = McpBearerAuthMiddleware(app)
 
     app = NoStoreMiddleware(app)
 
