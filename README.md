@@ -40,7 +40,8 @@ Edit `.env` with your own credentials:
 
 ```dotenv
 OANDA_TOKEN=your-token
-OANDA_ACCOUNT_ID=your-account-id
+# Optional: override which account GET /instruments uses
+OANDA_ACCOUNT_ID=
 OANDA_ENVIRONMENT=practice
 OANDA_TIMEOUT_SECONDS=10
 HISTORICAL_API_KEY=replace-with-a-long-random-token
@@ -50,7 +51,7 @@ RESEARCH_CONTEXT_TOKEN=replace-with-a-long-random-token
 MCP_AUTH_TOKEN=replace-with-a-long-random-token
 ```
 
-`OANDA_ENVIRONMENT` accepts only `practice` or `live`. The candles endpoint does not need an OANDA account ID, while `GET /instruments` uses `OANDA_ACCOUNT_ID` to query the instruments available to that account. Neither the bearer token nor account ID is returned by the API.
+`OANDA_ENVIRONMENT` accepts only `practice` or `live`. `GET /instruments` automatically discovers an account from OANDA using `OANDA_TOKEN` when `OANDA_ACCOUNT_ID` is omitted. Set `OANDA_ACCOUNT_ID` only when you want to force a specific account. Neither the bearer token nor account ID is returned by the API.
 
 Start the server:
 
@@ -81,7 +82,7 @@ Example response:
 }
 ```
 
-The result is account-specific because OANDA determines tradeable instruments from the account's regulatory division. The response is served with `Cache-Control: no-store`.
+The result is account-specific because OANDA determines tradeable instruments from the account's regulatory division. When no account override is configured, the API uses the first account returned for the token. The response is served with `Cache-Control: no-store`.
 
 ## Usage: latest candles
 
